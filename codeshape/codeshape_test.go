@@ -242,6 +242,12 @@ func TestCollect_AgentConfigPathsTouched(t *testing.T) {
 		{".codex/ dir at root", []codeshape.File{{Path: ".codex/instructions.md"}}, []string{".codex/instructions.md"}},
 		{".continue/ dir at root", []codeshape.File{{Path: ".continue/config.json"}}, []string{".continue/config.json"}},
 		{".windsurf/ dir at root", []codeshape.File{{Path: ".windsurf/rules.md"}}, []string{".windsurf/rules.md"}},
+		{".gemini/ dir at root", []codeshape.File{{Path: ".gemini/config.yaml"}}, []string{".gemini/config.yaml"}},
+		{".gemini file at root (alt to GEMINI.md)", []codeshape.File{{Path: ".gemini"}}, []string{".gemini"}},
+		{".github/copilot-instructions.md canonical Copilot path", []codeshape.File{{Path: ".github/copilot-instructions.md"}}, []string{".github/copilot-instructions.md"}},
+		{"copilot-instructions.md basename match anywhere", []codeshape.File{{Path: "docs/copilot-instructions.md"}}, []string{"docs/copilot-instructions.md"}},
+		{".github/instructions/* path-scoped Copilot file", []codeshape.File{{Path: ".github/instructions/api.instructions.md"}}, []string{".github/instructions/api.instructions.md"}},
+		{".instructions.md suffix match anywhere", []codeshape.File{{Path: "src/auth.instructions.md"}}, []string{"src/auth.instructions.md"}},
 		{".cursor/ dir nested mid-path", []codeshape.File{{Path: "frontend/.cursor/rules"}}, []string{"frontend/.cursor/rules"}},
 		{".claude/ dir nested deep", []codeshape.File{{Path: "apps/web/.claude/settings.local.json"}}, []string{"apps/web/.claude/settings.local.json"}},
 		{
@@ -290,6 +296,26 @@ func TestCollect_AgentConfigPathsTouched(t *testing.T) {
 		{
 			name:  ".idea is not in catalog",
 			files: []codeshape.File{{Path: ".idea/workspace.xml"}},
+			want:  nil,
+		},
+		{
+			name:  "bare instructions.md is not a Copilot instruction file (suffix requires prefix)",
+			files: []codeshape.File{{Path: "instructions.md"}},
+			want:  nil,
+		},
+		{
+			name:  "instruction.md singular is not the catalog compound suffix",
+			files: []codeshape.File{{Path: "api.instruction.md"}},
+			want:  nil,
+		},
+		{
+			name:  "literal .instructions.md filename does not match suffix without prefix",
+			files: []codeshape.File{{Path: ".instructions.md"}},
+			want:  nil,
+		},
+		{
+			name:  ".github is not blanket-matched (only specific Copilot files within)",
+			files: []codeshape.File{{Path: ".github/workflows/ci.yml"}},
 			want:  nil,
 		},
 	}

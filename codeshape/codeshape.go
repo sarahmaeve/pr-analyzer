@@ -180,21 +180,28 @@ func touchedRiskyPaths(files []File, patterns []string) []string {
 // threat-derived corpus uses these exact spellings, and a case-insensitive
 // match would balloon the false-positive surface (e.g. `claude.md` as a
 // notes file). Catalog is built-in — these are a cross-project threat
-// class, not a per-project preference.
+// class, not a per-project preference. See
+// signatory/design/threat-landscape/2026-05-24-trapdoor-crypto-stealer.md
+// for the originating Trapdoor PR-against-legit-AI-project vector;
+// .github/copilot-instructions.md is documented at
+// docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/add-custom-instructions/add-repository-instructions.
 var agentConfigFilenames = map[string]struct{}{
-	".cursorrules":     {},
-	"CLAUDE.md":        {},
-	"AGENTS.md":        {},
-	"GEMINI.md":        {},
-	".windsurfrules":   {},
-	".aider.conf.yml":  {},
-	".aider.conf.yaml": {},
+	".cursorrules":            {},
+	"CLAUDE.md":               {},
+	"AGENTS.md":               {},
+	"GEMINI.md":               {},
+	".windsurfrules":          {},
+	".aider.conf.yml":         {},
+	".aider.conf.yaml":        {},
+	"copilot-instructions.md": {},
 }
 
 // agentConfigDirs catalogs path segments that, when present anywhere in a
 // PR file's path, signal an AI-agent configuration touch. Whole-segment
 // match — `.cursor` matches `.cursor/rules` and `apps/web/.cursor/x` but
-// not `.cursor.bak/rules`.
+// not `.cursor.bak/rules`. A single-segment path equal to a catalog entry
+// (e.g. a file `.gemini` at repo root) is also matched, since `SplitSeq`
+// yields the basename as the sole segment.
 var agentConfigDirs = map[string]struct{}{
 	".claude":   {},
 	".cursor":   {},
@@ -203,7 +210,16 @@ var agentConfigDirs = map[string]struct{}{
 	".codex":    {},
 	".continue": {},
 	".windsurf": {},
+	".gemini":   {},
 }
+
+// agentConfigInstructionsSuffix matches GitHub Copilot's path-scoped
+// instructions files at .github/instructions/NAME.instructions.md. The
+// compound .instructions.md suffix is specific enough that a basename-
+// suffix match is conservative — bare instructions.md or *.instruction.md
+// (singular) do not match, and the suffix alone with no prefix does not
+// match either.
+const agentConfigInstructionsSuffix = ".instructions.md"
 
 func touchedAgentConfig(files []File) []string {
 	var out []string
@@ -216,7 +232,11 @@ func touchedAgentConfig(files []File) []string {
 }
 
 func matchesAgentConfig(p string) bool {
-	if _, ok := agentConfigFilenames[path.Base(p)]; ok {
+	base := path.Base(p)
+	if _, ok := agentConfigFilenames[base]; ok {
+		return true
+	}
+	if len(base) > len(agentConfigInstructionsSuffix) && strings.HasSuffix(base, agentConfigInstructionsSuffix) {
 		return true
 	}
 	for seg := range strings.SplitSeq(p, "/") {
