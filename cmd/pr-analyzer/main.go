@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,8 +29,9 @@ const usage = "usage: pr-analyzer <owner/repo#number | https://github.com/owner/
 // cliArgs is the declarative CLI surface. Kong fills it in from os.Args
 // and validates --config as an existing file before run() is ever called.
 type cliArgs struct {
-	Config string `short:"c" type:"existingfile" help:"Path to project config file (overrides walk-up discovery)."`
-	PR     string `arg:"" name:"pr-ref" help:"PR ref: owner/repo#number or full GitHub PR URL."`
+	Config        string `short:"c" type:"existingfile" help:"Path to project config file (overrides walk-up discovery)."`
+	LocalCloneDir string `name:"local-clone-dir" type:"existingdir" help:"Local checkout of the PR's repository. Defaults to CWD when unset."`
+	PR            string `arg:"" name:"pr-ref" help:"PR ref: owner/repo#number or full GitHub PR URL."`
 }
 
 func main() {
@@ -50,7 +52,12 @@ func run(args cliArgs, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	cfg, warnings, err := loadConfig(args.Config)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	cfg, warnings, err := loadConfig(args.Config, cwd)
 	if err != nil {
 		return err
 	}
@@ -61,6 +68,8 @@ func run(args cliArgs, stdout, stderr io.Writer) error {
 			fmt.Fprintf(stderr, "warning: %s\n", w.Message)
 		}
 	}
+
+	cfg.LocalCloneDir = resolveLocalCloneDir(args.LocalCloneDir, cfg.LocalCloneDir, cwd)
 
 	baseURL := os.Getenv("GITHUB_API_BASE_URL")
 	if err := validateBaseURL(baseURL); err != nil {
@@ -91,18 +100,32 @@ func run(args cliArgs, stdout, stderr io.Writer) error {
 
 // loadConfig returns the project config and any non-fatal warnings.
 // When the user passed --config, the path must exist (fatal otherwise);
-// otherwise we walk up from CWD looking for pr-analyzer.yaml and accept
-// a miss silently.
-func loadConfig(explicitPath string) (analyzer.Config, []configfile.Warning, error) {
+// otherwise we walk up from startDir looking for pr-analyzer.yaml and
+// accept a miss silently.
+func loadConfig(explicitPath, startDir string) (analyzer.Config, []configfile.Warning, error) {
 	if explicitPath != "" {
 		return configfile.Load(explicitPath)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return analyzer.Config{}, nil, fmt.Errorf("get working directory: %w", err)
-	}
-	cfg, _, warnings, err := configfile.Discover(cwd)
+	cfg, _, warnings, err := configfile.Discover(startDir)
 	return cfg, warnings, err
+}
+
+// resolveLocalCloneDir applies slice-3's precedence ladder. The flag
+// value (if present) wins, resolving against CWD when relative; the
+// YAML value (if present) is used as-is, since the loader has already
+// resolved it against the config-file directory; otherwise CWD is the
+// default.
+func resolveLocalCloneDir(flagValue, yamlValue, cwd string) string {
+	if flagValue != "" {
+		if filepath.IsAbs(flagValue) {
+			return flagValue
+		}
+		return filepath.Join(cwd, flagValue)
+	}
+	if yamlValue != "" {
+		return yamlValue
+	}
+	return cwd
 }
 
 type authTransport struct {

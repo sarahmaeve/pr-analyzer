@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alecthomas/kong"
+
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 )
 
@@ -45,6 +47,77 @@ func pr144FixtureServer(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// TestResolveLocalCloneDir pins the precedence ladder for slice 3:
+// --local-clone-dir CLI flag > local_clone_dir YAML > CWD. Relative
+// flag values resolve against CWD; YAML values have already been
+// resolved against the config-file directory by the loader.
+func TestResolveLocalCloneDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		flagValue string
+		yamlValue string
+		cwd       string
+		want      string
+	}{
+		{"flag wins over YAML", "/flag/path", "/yaml/path", "/cwd", "/flag/path"},
+		{"flag empty, YAML wins", "", "/yaml/path", "/cwd", "/yaml/path"},
+		{"both empty, CWD default", "", "", "/cwd", "/cwd"},
+		{"relative flag resolves against CWD", "rel", "", "/cwd", "/cwd/rel"},
+		{"absolute flag passes through unchanged", "/abs", "", "/cwd", "/abs"},
+		{"relative flag wins over absolute YAML and resolves against CWD", "rel", "/yaml/abs", "/cwd", "/cwd/rel"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveLocalCloneDir(tc.flagValue, tc.yamlValue, tc.cwd)
+			if got != tc.want {
+				t.Errorf("resolveLocalCloneDir(%q, %q, %q) = %q, want %q",
+					tc.flagValue, tc.yamlValue, tc.cwd, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestKongParse_LocalCloneDir_AcceptsExistingDir(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	var args cliArgs
+	parser, err := kong.New(&args)
+	if err != nil {
+		t.Fatalf("kong.New: %v", err)
+	}
+	if _, err = parser.Parse([]string{"--local-clone-dir", tempDir, "o/r#1"}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if args.LocalCloneDir != tempDir {
+		t.Errorf("LocalCloneDir = %q, want %q", args.LocalCloneDir, tempDir)
+	}
+	if args.PR != "o/r#1" {
+		t.Errorf("PR = %q, want %q", args.PR, "o/r#1")
+	}
+}
+
+func TestKongParse_LocalCloneDir_RejectsMissingDir(t *testing.T) {
+	t.Parallel()
+
+	nonExistent := filepath.Join(t.TempDir(), "does-not-exist")
+	var args cliArgs
+	parser, err := kong.New(&args)
+	if err != nil {
+		t.Fatalf("kong.New: %v", err)
+	}
+	_, err = parser.Parse([]string{"--local-clone-dir", nonExistent, "o/r#1"})
+	if err == nil {
+		t.Fatal("expected error for non-existent directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Errorf("error %v does not mention the bad path", err)
+	}
 }
 
 func TestParsePRRef(t *testing.T) {

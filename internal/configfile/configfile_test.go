@@ -37,6 +37,11 @@ func TestLoad_HappyPath(t *testing.T) {
 			want: analyzer.Config{CodeShape: codeshape.Config{MaxLOC: 1000}},
 		},
 		{
+			name: "local_clone_dir absolute path passes through unchanged",
+			yaml: "local_clone_dir: /abs/path/to/clone\n",
+			want: analyzer.Config{LocalCloneDir: "/abs/path/to/clone"},
+		},
+		{
 			name: "full config",
 			yaml: `render:
   bar_scale: 200
@@ -332,6 +337,52 @@ func TestDiscover(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoad_LocalCloneDirRelativePath(t *testing.T) {
+	t.Parallel()
+
+	// A relative local_clone_dir in the YAML must resolve against the
+	// YAML file's directory — that's where the user thinks of "here" when
+	// they edit the file. Resolving against CWD would be surprising if
+	// the user invokes the CLI from elsewhere.
+	tempDir := t.TempDir()
+	yamlPath := filepath.Join(tempDir, "pr-analyzer.yaml")
+	if err := os.WriteFile(yamlPath, []byte("local_clone_dir: subdir\n"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	cfg, warnings, err := configfile.Load(yamlPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+
+	want := filepath.Join(tempDir, "subdir")
+	if cfg.LocalCloneDir != want {
+		t.Errorf("LocalCloneDir = %q, want %q (resolved against YAML directory)", cfg.LocalCloneDir, want)
+	}
+}
+
+func TestLoad_LocalCloneDirAbsolutePathUntouched(t *testing.T) {
+	t.Parallel()
+
+	// Absolute paths are NOT modified by the resolution step.
+	tempDir := t.TempDir()
+	yamlPath := filepath.Join(tempDir, "pr-analyzer.yaml")
+	if err := os.WriteFile(yamlPath, []byte("local_clone_dir: /abs/elsewhere\n"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	cfg, _, err := configfile.Load(yamlPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LocalCloneDir != "/abs/elsewhere" {
+		t.Errorf("LocalCloneDir = %q, want %q unchanged", cfg.LocalCloneDir, "/abs/elsewhere")
 	}
 }
 

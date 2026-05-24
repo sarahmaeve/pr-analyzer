@@ -125,6 +125,28 @@ func TestAnalyze_WithConfig_flowsThroughToCodeShape(t *testing.T) {
 	}
 }
 
+// TestAnalyze_WithConfig_LocalCloneDirFlowsThrough pins the slice-3
+// plumbing: a LocalCloneDir set on the Config given to WithConfig must
+// reach Analysis.Config.LocalCloneDir unchanged. No collector reads it
+// yet — this test exists so a regression in Analyze's option handling
+// (e.g. dropping the field while plumbing slice-4's engineer profile)
+// fails loud.
+func TestAnalyze_WithConfig_LocalCloneDirFlowsThrough(t *testing.T) {
+	t.Parallel()
+
+	ref := analyzer.PRRef{Owner: "x", Repo: "y", Number: 1}
+	src := fakeSource{pr: analyzer.PR{Ref: ref}}
+
+	got, err := analyzer.Analyze(context.Background(), src, ref,
+		analyzer.WithConfig(analyzer.Config{LocalCloneDir: "/some/path"}))
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if got.Config.LocalCloneDir != "/some/path" {
+		t.Errorf("Analysis.Config.LocalCloneDir = %q, want %q", got.Config.LocalCloneDir, "/some/path")
+	}
+}
+
 func TestAnalyze_propagatesSourceError(t *testing.T) {
 	t.Parallel()
 

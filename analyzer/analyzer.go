@@ -46,4 +46,8 @@ type PRSource interface {
 type Analysis struct {
 	PR        PR
 	CodeShape codeshape.Signals
+	// Config is the project Config that produced this Analysis. It is
+	// echoed back so renderers and embedders can reference the
+	// configuration without re-loading it.
+	Config Config
 }

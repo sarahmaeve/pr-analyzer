@@ -9,6 +9,12 @@ import (
 // WithConfig) and the renderer. Zero values preserve slice-1 defaults
 // throughout.
 type Config struct {
-	Render    render.Config    `yaml:"render"`
-	CodeShape codeshape.Config `yaml:"codeshape"`
+	// LocalCloneDir is an absolute path to the PR's checked-out
+	// repository on disk. pr-analyzer never clones — the caller is
+	// responsible for the checkout existing. Empty string means "not
+	// configured"; downstream collectors that need it error at point
+	// of use.
+	LocalCloneDir string           `yaml:"local_clone_dir"`
+	Render        render.Config    `yaml:"render"`
+	CodeShape     codeshape.Config `yaml:"codeshape"`
 }

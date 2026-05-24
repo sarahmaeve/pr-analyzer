@@ -77,8 +77,21 @@ func Load(path string) (analyzer.Config, []Warning, error) {
 	}
 
 	warnings = append(warnings, clampBarScale(&cfg)...)
+	resolveLocalCloneDir(&cfg, path)
 
 	return cfg, warnings, nil
+}
+
+// resolveLocalCloneDir converts a relative LocalCloneDir into an
+// absolute path, resolved against the directory containing the YAML
+// file. Absolute paths and empty strings are left untouched. The
+// loader does not stat the result — existence validation is the
+// downstream collector's responsibility.
+func resolveLocalCloneDir(cfg *analyzer.Config, yamlPath string) {
+	if cfg.LocalCloneDir == "" || filepath.IsAbs(cfg.LocalCloneDir) {
+		return
+	}
+	cfg.LocalCloneDir = filepath.Join(filepath.Dir(yamlPath), cfg.LocalCloneDir)
 }
 
 // clampBarScale pins render.bar_scale into [minBarScale, maxBarScale]

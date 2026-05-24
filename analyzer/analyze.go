@@ -48,5 +48,6 @@ func Analyze(ctx context.Context, src PRSource, ref PRRef, opts ...Option) (Anal
 			Files:     files,
 			Config:    o.config.CodeShape,
 		}),
+		Config: o.config,
 	}, nil
 }
