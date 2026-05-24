@@ -68,3 +68,15 @@ This code follows product restrictions.
 
 where the simple bar graph [++++-----] refers to lines modified, divided into adds and deletes. The scale of this graph should be configurable by project; our initial default should be 100 LOCs per glyph.
 
+## Status
+
+Implementation is sliced; per-slice specs in `design/PROTO*.md`.
+
+- **Slice 1** ([PROTO.md](PROTO.md)): end-to-end Code Shape pipeline (LOC, tests, manifests, languages), GitHub connector, CLI renderer.
+- **Slice 2** ([PROTO2.md](PROTO2.md)): per-project YAML config — risky paths, max LOC, language posture.
+- **Slice 3** ([PROTO3.md](PROTO3.md)): local clone directory plumbing (`--local-clone-dir` / `local_clone_dir`), foundational for future OWNERS / git-log collectors.
+- **Slice 4** ([PROTO4.md](PROTO4.md)): Engineer Profile foundation — `author_association` signal end-to-end, metadata-only, no new API calls. Heavier engineer-profile work (OWNERS, git log) lands in a later slice and consumes the slice-3 local clone directory.
+- **Agent-config-touched signal** (between slices 3 and 4): cross-project threat class — PRs adding `.cursorrules`, `CLAUDE.md`, `.claude/`, `.cursor/`, `.github/copilot-instructions.md`, etc. Cross-references signatory's Trapdoor crypto-stealer threat-landscape entry.
+- **Catalog additions**: Lua programming language; Copilot custom-instructions paths; Gemini configuration.
+
+Live test targets: `sarahmaeve/signatory#144` (real, slice 1 baseline) and the fabricated `agentforge/copilot-toolkit#47` Trapdoor fixture (`connectors/github/testdata/pr_trapdoor*.json`).
