@@ -132,6 +132,233 @@ func TestCollect_ManifestsTouched(t *testing.T) {
 	}
 }
 
+func TestCollect_RiskyPathsTouched(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		files      []codeshape.File
+		riskyPaths []string
+		want       []string
+	}{
+		{
+			name:       "no config returns nil",
+			files:      []codeshape.File{{Path: "billing/foo.go"}},
+			riskyPaths: nil,
+			want:       nil,
+		},
+		{
+			name:       "configured but no match returns nil",
+			files:      []codeshape.File{{Path: "src/foo.go"}},
+			riskyPaths: []string{"billing"},
+			want:       nil,
+		},
+		{
+			name:       "single prefix match",
+			files:      []codeshape.File{{Path: "billing/foo.go"}},
+			riskyPaths: []string{"billing"},
+			want:       []string{"billing/foo.go"},
+		},
+		{
+			name:       "exact path match (no trailing slash needed)",
+			files:      []codeshape.File{{Path: "billing"}},
+			riskyPaths: []string{"billing"},
+			want:       []string{"billing"},
+		},
+		{
+			name:       "prefix collision: billings is not billing",
+			files:      []codeshape.File{{Path: "billings/foo.go"}},
+			riskyPaths: []string{"billing"},
+			want:       nil,
+		},
+		{
+			name:       "multi-segment pattern",
+			files:      []codeshape.File{{Path: "auth/identity/jwt.go"}},
+			riskyPaths: []string{"auth/identity"},
+			want:       []string{"auth/identity/jwt.go"},
+		},
+		{
+			name:       "multi-segment near miss",
+			files:      []codeshape.File{{Path: "auth/identity2/jwt.go"}},
+			riskyPaths: []string{"auth/identity"},
+			want:       nil,
+		},
+		{
+			name: "multiple matches preserve file-list order",
+			files: []codeshape.File{
+				{Path: "payments/x.go"},
+				{Path: "src/y.go"},
+				{Path: "billing/z.go"},
+			},
+			riskyPaths: []string{"billing", "payments"},
+			want:       []string{"payments/x.go", "billing/z.go"},
+		},
+		{
+			name: "file matching two patterns is reported once",
+			files: []codeshape.File{
+				{Path: "billing/charge.go"},
+			},
+			riskyPaths: []string{"billing", "billing/charge.go"},
+			want:       []string{"billing/charge.go"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := codeshape.Input{
+				Files:  tc.files,
+				Config: codeshape.Config{RiskyPaths: tc.riskyPaths},
+			}
+			got := codeshape.Collect(in).RiskyPathsTouched
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("RiskyPathsTouched = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCollect_LanguagesByPosture(t *testing.T) {
+	t.Parallel()
+
+	type want struct {
+		preferred []string
+		allowed   []string
+		anomalous []string
+	}
+
+	tests := []struct {
+		name   string
+		files  []codeshape.File
+		config codeshape.LanguageConfig
+		want   want
+	}{
+		{
+			name:   "empty config returns zero-value posture (no opinion)",
+			files:  []codeshape.File{{Path: "main.go"}, {Path: "lib.ts"}},
+			config: codeshape.LanguageConfig{},
+			want:   want{},
+		},
+		{
+			name:  "preferred and allowed buckets",
+			files: []codeshape.File{{Path: "main.go"}, {Path: "lib.ts"}},
+			config: codeshape.LanguageConfig{
+				Preferred: []string{"Go"},
+				Allowed:   []string{"Go", "TypeScript"},
+			},
+			want: want{
+				preferred: []string{"Go"},
+				allowed:   []string{"TypeScript"},
+			},
+		},
+		{
+			name:  "detected programming language outside both lists is anomalous",
+			files: []codeshape.File{{Path: "main.go"}, {Path: "lib.rs"}},
+			config: codeshape.LanguageConfig{
+				Preferred: []string{"Go"},
+			},
+			want: want{
+				preferred: []string{"Go"},
+				anomalous: []string{"Rust"},
+			},
+		},
+		{
+			name: "non-programming languages (Markdown, YAML) never anomalous",
+			files: []codeshape.File{
+				{Path: "main.go"},
+				{Path: "README.md"},
+				{Path: ".github/workflows/ci.yml"},
+			},
+			config: codeshape.LanguageConfig{
+				Preferred: []string{"Go"},
+			},
+			want: want{
+				preferred: []string{"Go"},
+				// Markdown and YAML are non-programming; never anomalous.
+			},
+		},
+		{
+			name: "shell script anywhere counts as Shell (no CI-path exemption in slice 2)",
+			files: []codeshape.File{
+				{Path: "main.go"},
+				{Path: ".github/workflows/build.sh"},
+			},
+			config: codeshape.LanguageConfig{
+				Preferred: []string{"Go"},
+			},
+			want: want{
+				preferred: []string{"Go"},
+				anomalous: []string{"Shell"},
+			},
+		},
+		{
+			name:  "language in preferred but not allowed still buckets as preferred",
+			files: []codeshape.File{{Path: "main.go"}},
+			config: codeshape.LanguageConfig{
+				Preferred: []string{"Go"},
+				Allowed:   []string{"TypeScript"},
+			},
+			want: want{
+				preferred: []string{"Go"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := codeshape.Input{
+				Files:  tc.files,
+				Config: codeshape.Config{Languages: tc.config},
+			}
+			got := codeshape.Collect(in).LanguagesByPosture
+			if !slices.Equal(got.Preferred, tc.want.preferred) {
+				t.Errorf("Preferred = %v, want %v", got.Preferred, tc.want.preferred)
+			}
+			if !slices.Equal(got.Allowed, tc.want.allowed) {
+				t.Errorf("Allowed = %v, want %v", got.Allowed, tc.want.allowed)
+			}
+			if !slices.Equal(got.Anomalous, tc.want.anomalous) {
+				t.Errorf("Anomalous = %v, want %v", got.Anomalous, tc.want.anomalous)
+			}
+		})
+	}
+}
+
+func TestCollect_ExceedsMaxLOC(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		additions     int
+		deletions     int
+		maxLOC        int
+		wantExceeds   bool
+		wantThreshold int
+	}{
+		{"maxLOC unset means no opinion", 9999, 9999, 0, false, 0},
+		{"under threshold", 500, 200, 1000, false, 1000},
+		{"exactly at threshold is not exceeded (strict greater-than)", 600, 400, 1000, false, 1000},
+		{"one over threshold", 600, 401, 1000, true, 1000},
+		{"far over threshold", 8000, 200, 1000, true, 1000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := codeshape.Input{
+				Additions: tc.additions,
+				Deletions: tc.deletions,
+				Config:    codeshape.Config{MaxLOC: tc.maxLOC},
+			}
+			sig := codeshape.Collect(in)
+			if sig.ExceedsMaxLOC != tc.wantExceeds {
+				t.Errorf("ExceedsMaxLOC = %v, want %v", sig.ExceedsMaxLOC, tc.wantExceeds)
+			}
+			if sig.MaxLOCThreshold != tc.wantThreshold {
+				t.Errorf("MaxLOCThreshold = %d, want %d", sig.MaxLOCThreshold, tc.wantThreshold)
+			}
+		})
+	}
+}
+
 func TestCollect_Languages(t *testing.T) {
 	t.Parallel()
 

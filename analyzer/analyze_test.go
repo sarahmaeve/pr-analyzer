@@ -74,6 +74,57 @@ func TestAnalyze_translatesPRtoInputAndPopulatesCodeShape(t *testing.T) {
 	}
 }
 
+func TestAnalyze_WithConfig_flowsThroughToCodeShape(t *testing.T) {
+	t.Parallel()
+
+	ref := analyzer.PRRef{Owner: "x", Repo: "y", Number: 1}
+	src := fakeSource{
+		pr: analyzer.PR{
+			Ref:          ref,
+			Author:       "u",
+			URL:          "https://github.com/x/y/pull/1",
+			Additions:    1500,
+			Deletions:    100,
+			ChangedFiles: 3,
+			Files: []analyzer.PRFile{
+				{Path: "billing/charge.go"},
+				{Path: "main.go"},
+				{Path: "lib.rs"},
+			},
+		},
+	}
+	cfg := analyzer.Config{
+		CodeShape: codeshape.Config{
+			RiskyPaths: []string{"billing"},
+			MaxLOC:     1000,
+			Languages: codeshape.LanguageConfig{
+				Preferred: []string{"Go"},
+			},
+		},
+	}
+
+	got, err := analyzer.Analyze(context.Background(), src, ref, analyzer.WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	if !slices.Equal(got.CodeShape.RiskyPathsTouched, []string{"billing/charge.go"}) {
+		t.Errorf("RiskyPathsTouched = %v, want [billing/charge.go]", got.CodeShape.RiskyPathsTouched)
+	}
+	if !got.CodeShape.ExceedsMaxLOC {
+		t.Errorf("ExceedsMaxLOC = false, want true (1600 > 1000)")
+	}
+	if got.CodeShape.MaxLOCThreshold != 1000 {
+		t.Errorf("MaxLOCThreshold = %d, want 1000", got.CodeShape.MaxLOCThreshold)
+	}
+	if !slices.Equal(got.CodeShape.LanguagesByPosture.Preferred, []string{"Go"}) {
+		t.Errorf("LanguagesByPosture.Preferred = %v, want [Go]", got.CodeShape.LanguagesByPosture.Preferred)
+	}
+	if !slices.Equal(got.CodeShape.LanguagesByPosture.Anomalous, []string{"Rust"}) {
+		t.Errorf("LanguagesByPosture.Anomalous = %v, want [Rust]", got.CodeShape.LanguagesByPosture.Anomalous)
+	}
+}
+
 func TestAnalyze_propagatesSourceError(t *testing.T) {
 	t.Parallel()
 

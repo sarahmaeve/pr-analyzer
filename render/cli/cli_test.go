@@ -8,6 +8,7 @@ import (
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 	"github.com/sarahmaeve/pr-analyzer/codeshape"
+	"github.com/sarahmaeve/pr-analyzer/render"
 	"github.com/sarahmaeve/pr-analyzer/render/cli"
 )
 
@@ -171,15 +172,109 @@ no dependency manifest touched
 languages: Go
 `,
 		},
+		{
+			name: "all slice-2 bullets fire in canonical order",
+			in: analyzer.Analysis{
+				PR: analyzer.PR{
+					Ref:          analyzer.PRRef{Owner: "x", Repo: "y", Number: 999},
+					Author:       "sarahmaeve",
+					URL:          "https://github.com/x/y/pull/999",
+					ChangedFiles: 4,
+				},
+				CodeShape: codeshape.Signals{
+					LOC:               codeshape.LOC{Additions: 1200, Deletions: 100, Total: 1300},
+					TestsTouched:      true,
+					Languages:         []string{"Go", "Rust"},
+					RiskyPathsTouched: []string{"billing/charge.go", "payments/refund.go"},
+					ExceedsMaxLOC:     true,
+					MaxLOCThreshold:   1000,
+					LanguagesByPosture: codeshape.LanguagesByPosture{
+						Preferred: []string{"Go"},
+						Anomalous: []string{"Rust"},
+					},
+				},
+			},
+			want: `PR #999 sarahmaeve https://github.com/x/y/pull/999
+[++++++++++++-]
+adds: 1200  deletes: 100  files: 4
+tests touched
+no dependency manifest touched
+languages: Go, Rust
+languages preferred: Go
+languages anomalous: Rust
+risky paths touched: billing/charge.go, payments/refund.go
+exceeds max LOC: 1300 > 1000
+`,
+		},
+		{
+			name: "languages allowed bucket renders when non-empty",
+			in: analyzer.Analysis{
+				PR: analyzer.PR{
+					Ref:          analyzer.PRRef{Owner: "x", Repo: "y", Number: 42},
+					Author:       "u",
+					URL:          "https://github.com/x/y/pull/42",
+					ChangedFiles: 2,
+				},
+				CodeShape: codeshape.Signals{
+					LOC:       codeshape.LOC{Additions: 10, Deletions: 0, Total: 10},
+					Languages: []string{"Go", "TypeScript"},
+					LanguagesByPosture: codeshape.LanguagesByPosture{
+						Preferred: []string{"Go"},
+						Allowed:   []string{"TypeScript"},
+					},
+				},
+			},
+			want: `PR #42 u https://github.com/x/y/pull/42
+[+]
+adds: 10  deletes: 0  files: 2
+no tests touched
+no dependency manifest touched
+languages: Go, TypeScript
+languages preferred: Go
+languages allowed: TypeScript
+`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := cli.Render(tc.in)
+			got := cli.Render(tc.in, render.Config{})
 			if got != tc.want {
 				t.Errorf("Render() mismatch\n--- want ---\n%s--- got ---\n%s", tc.want, got)
 			}
 		})
+	}
+}
+
+// TestRender_BarScaleOverride pins down the render.Config.BarScale path:
+// when the user-supplied starting scale differs from the default, the
+// bar uses it AND the scale notice fires (because scale != defaultScale).
+// The renderer's auto-scale logic still applies on top of the override.
+func TestRender_BarScaleOverride(t *testing.T) {
+	t.Parallel()
+
+	in := analyzer.Analysis{
+		PR: analyzer.PR{
+			Ref:          analyzer.PRRef{Owner: "x", Repo: "y", Number: 1},
+			Author:       "u",
+			URL:          "https://example.test/x/y/pull/1",
+			ChangedFiles: 1,
+		},
+		CodeShape: codeshape.Signals{
+			LOC: codeshape.LOC{Additions: 50, Deletions: 50, Total: 100},
+		},
+	}
+
+	// At scale=200, ceil(50/200)=1 per side. Bar is two glyphs; notice fires.
+	got := cli.Render(in, render.Config{BarScale: 200})
+	want := `PR #1 u https://example.test/x/y/pull/1
+[+-]  scale: 200 LOC/glyph
+adds: 50  deletes: 50  files: 1
+no tests touched
+no dependency manifest touched
+`
+	if got != want {
+		t.Errorf("Render() mismatch\n--- want ---\n%s--- got ---\n%s", want, got)
 	}
 }
 
@@ -250,7 +345,7 @@ func TestRender_BoundaryAndExtremeValues(t *testing.T) {
 					LOC: codeshape.LOC{Additions: tc.additions, Deletions: tc.deletions},
 				},
 			}
-			got := cli.Render(in)
+			got := cli.Render(in, render.Config{})
 			if got != tc.want {
 				t.Errorf("Render() mismatch\n--- want ---\n%s--- got ---\n%s", tc.want, got)
 			}

@@ -27,6 +27,26 @@ func buildBinary(t *testing.T) string {
 	return bin
 }
 
+// pr144FixtureServer stands up an httptest server that serves the
+// captured PR #144 JSON for both the detail and files endpoints. The
+// server is closed via t.Cleanup. Used by the slice-1 smoke test and
+// the slice-2 config-driven smoke tests.
+func pr144FixtureServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/sarahmaeve/signatory/pulls/144", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "../../connectors/github/testdata/pr_144.json")
+	})
+	mux.HandleFunc("/repos/sarahmaeve/signatory/pulls/144/files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "../../connectors/github/testdata/pr_144_files.json")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func TestParsePRRef(t *testing.T) {
 	t.Parallel()
 
@@ -140,7 +160,7 @@ func TestRun_RejectsHostileBaseURL(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "any-token")
 	t.Setenv("GITHUB_API_BASE_URL", "https://attacker.example.com")
 
-	err := run([]string{"o/r#1"}, io.Discard)
+	err := run(cliArgs{PR: "o/r#1"}, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error for hostile GITHUB_API_BASE_URL, got nil")
 	}
@@ -192,18 +212,7 @@ func TestSmoke_PR144(t *testing.T) {
 	t.Parallel()
 
 	bin := buildBinary(t)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/sarahmaeve/signatory/pulls/144", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		http.ServeFile(w, r, "../../connectors/github/testdata/pr_144.json")
-	})
-	mux.HandleFunc("/repos/sarahmaeve/signatory/pulls/144/files", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		http.ServeFile(w, r, "../../connectors/github/testdata/pr_144_files.json")
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
+	srv := pr144FixtureServer(t)
 
 	// Run the binary against the fixture server. Env is an explicit allowlist
 	// rather than os.Environ() so a real GITHUB_TOKEN in the parent cannot
@@ -248,6 +257,106 @@ func TestSmoke_PR144(t *testing.T) {
 
 	if stderr.Len() != 0 {
 		t.Errorf("expected empty stderr on success, got:\n%s", stderr.String())
+	}
+}
+
+// TestSmoke_PR144_WithConfig exercises the --config end-to-end path:
+// project config on disk, binary picks it up, every slice-2 knob that
+// the config drives produces an observable change in the rendered
+// output.
+func TestSmoke_PR144_WithConfig(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+	srv := pr144FixtureServer(t)
+
+	// max_loc: 100 will trip on PR #144's 5851 total LOC.
+	// risky_paths: cmd matches files like cmd/signatory/collectors.go.
+	// languages.preferred: [Go] surfaces Go in the preferred bucket.
+	// render.bar_scale: 500 overrides auto-scale (which would otherwise
+	// land at 300 for this PR), so the scale notice changes too.
+	cfgBody := `render:
+  bar_scale: 500
+codeshape:
+  risky_paths: [cmd]
+  max_loc: 100
+  languages:
+    preferred: [Go]
+`
+	cfgPath := filepath.Join(t.TempDir(), "pr-analyzer.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cmd := exec.Command(bin, "--config", cfgPath, "sarahmaeve/signatory#144")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"GITHUB_TOKEN=smoke-test-token",
+		"GITHUB_API_BASE_URL=" + srv.URL,
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("binary failed: %v\nstderr:\n%s\nstdout:\n%s", err, stderr.String(), stdout.String())
+	}
+
+	out := stdout.String()
+	wants := []string{
+		// BarScale override actually applied (not auto-scaled to 300).
+		"scale: 500 LOC/glyph",
+		// Language posture bucket.
+		"languages preferred: Go\n",
+		// Risky paths matched at least one cmd/ file.
+		"risky paths touched: ",
+		"cmd/signatory/collectors.go",
+		// max_loc threshold exceeded.
+		"exceeds max LOC: 5851 > 100\n",
+	}
+	for _, want := range wants {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+// TestSmoke_PR144_DiscoversConfig drops pr-analyzer.yaml in a temp dir
+// and invokes the binary from a nested subdirectory without --config.
+// The discovery walk-up must find the file and apply it.
+func TestSmoke_PR144_DiscoversConfig(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+	srv := pr144FixtureServer(t)
+
+	tempDir := t.TempDir()
+	cfgBody := "codeshape:\n  languages:\n    preferred: [Go]\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "pr-analyzer.yaml"), []byte(cfgBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	subDir := filepath.Join(tempDir, "sub", "deeper")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	cmd := exec.Command(bin, "sarahmaeve/signatory#144")
+	cmd.Dir = subDir
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"GITHUB_TOKEN=smoke-test-token",
+		"GITHUB_API_BASE_URL=" + srv.URL,
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("binary failed: %v\nstderr:\n%s\nstdout:\n%s", err, stderr.String(), stdout.String())
+	}
+
+	if !strings.Contains(stdout.String(), "languages preferred: Go\n") {
+		t.Errorf("discovered config not applied; output:\n%s", stdout.String())
 	}
 }
 

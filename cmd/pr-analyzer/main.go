@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,27 +15,51 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alecthomas/kong"
+
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 	"github.com/sarahmaeve/pr-analyzer/connectors/github"
+	"github.com/sarahmaeve/pr-analyzer/internal/configfile"
 	"github.com/sarahmaeve/pr-analyzer/render/cli"
 )
 
 const usage = "usage: pr-analyzer <owner/repo#number | https://github.com/owner/repo/pull/N>"
 
+// cliArgs is the declarative CLI surface. Kong fills it in from os.Args
+// and validates --config as an existing file before run() is ever called.
+type cliArgs struct {
+	Config string `short:"c" type:"existingfile" help:"Path to project config file (overrides walk-up discovery)."`
+	PR     string `arg:"" name:"pr-ref" help:"PR ref: owner/repo#number or full GitHub PR URL."`
+}
+
 func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	var args cliArgs
+	kong.Parse(&args,
+		kong.Name("pr-analyzer"),
+		kong.Description("Analyzes a GitHub pull request and renders its Code Shape signals as a bar + bullets."),
+	)
+	if err := run(args, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, stdout io.Writer) error {
-	if len(args) != 1 {
-		return errors.New(usage)
-	}
-	ref, err := parsePRRef(args[0])
+func run(args cliArgs, stdout, stderr io.Writer) error {
+	ref, err := parsePRRef(args.PR)
 	if err != nil {
 		return err
+	}
+
+	cfg, warnings, err := loadConfig(args.Config)
+	if err != nil {
+		return err
+	}
+	for _, w := range warnings {
+		if w.Line > 0 {
+			fmt.Fprintf(stderr, "warning (line %d): %s\n", w.Line, w.Message)
+		} else {
+			fmt.Fprintf(stderr, "warning: %s\n", w.Message)
+		}
 	}
 
 	baseURL := os.Getenv("GITHUB_API_BASE_URL")
@@ -57,13 +80,29 @@ func run(args []string, stdout io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	analysis, err := analyzer.Analyze(ctx, src, ref)
+	analysis, err := analyzer.Analyze(ctx, src, ref, analyzer.WithConfig(cfg))
 	if err != nil {
 		return err
 	}
 
-	_, err = io.WriteString(stdout, cli.Render(analysis))
+	_, err = io.WriteString(stdout, cli.Render(analysis, cfg.Render))
 	return err
+}
+
+// loadConfig returns the project config and any non-fatal warnings.
+// When the user passed --config, the path must exist (fatal otherwise);
+// otherwise we walk up from CWD looking for pr-analyzer.yaml and accept
+// a miss silently.
+func loadConfig(explicitPath string) (analyzer.Config, []configfile.Warning, error) {
+	if explicitPath != "" {
+		return configfile.Load(explicitPath)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return analyzer.Config{}, nil, fmt.Errorf("get working directory: %w", err)
+	}
+	cfg, _, warnings, err := configfile.Discover(cwd)
+	return cfg, warnings, err
 }
 
 type authTransport struct {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
+	"github.com/sarahmaeve/pr-analyzer/render"
 )
 
 const (
@@ -19,12 +20,12 @@ const (
 	autoScaleSlop = 28 // (adds + deletes) / 28 absorbs the up-to-2-glyph ceil() slack
 )
 
-func Render(a analyzer.Analysis) string {
+func Render(a analyzer.Analysis, c render.Config) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "PR #%d %s %s\n", a.PR.Ref.Number, a.PR.Author, a.PR.URL)
 
-	bar, scale, omitted := computeBar(a.CodeShape.LOC.Additions, a.CodeShape.LOC.Deletions)
+	bar, scale, omitted := computeBar(a.CodeShape.LOC.Additions, a.CodeShape.LOC.Deletions, c.BarScale)
 	if !omitted {
 		if scale == defaultScale {
 			fmt.Fprintf(&b, "%s\n", bar)
@@ -53,17 +54,39 @@ func Render(a analyzer.Analysis) string {
 		fmt.Fprintf(&b, "languages: %s\n", strings.Join(a.CodeShape.Languages, ", "))
 	}
 
+	posture := a.CodeShape.LanguagesByPosture
+	if len(posture.Preferred) > 0 {
+		fmt.Fprintf(&b, "languages preferred: %s\n", strings.Join(posture.Preferred, ", "))
+	}
+	if len(posture.Allowed) > 0 {
+		fmt.Fprintf(&b, "languages allowed: %s\n", strings.Join(posture.Allowed, ", "))
+	}
+	if len(posture.Anomalous) > 0 {
+		fmt.Fprintf(&b, "languages anomalous: %s\n", strings.Join(posture.Anomalous, ", "))
+	}
+
+	if len(a.CodeShape.RiskyPathsTouched) > 0 {
+		fmt.Fprintf(&b, "risky paths touched: %s\n", strings.Join(a.CodeShape.RiskyPathsTouched, ", "))
+	}
+
+	if a.CodeShape.ExceedsMaxLOC {
+		fmt.Fprintf(&b, "exceeds max LOC: %d > %d\n", a.CodeShape.LOC.Total, a.CodeShape.MaxLOCThreshold)
+	}
+
 	return b.String()
 }
 
-func computeBar(adds, deletes int) (text string, scale int, omitted bool) {
+func computeBar(adds, deletes, startingScale int) (text string, scale int, omitted bool) {
 	if adds < 0 {
 		adds = 0
 	}
 	if deletes < 0 {
 		deletes = 0
 	}
-	scale = defaultScale
+	if startingScale <= 0 {
+		startingScale = defaultScale
+	}
+	scale = startingScale
 	if glyphWidth(adds, deletes, scale) > maxBarGlyphs {
 		scale = autoScale(adds, deletes)
 		if glyphWidth(adds, deletes, scale) > maxBarGlyphs {

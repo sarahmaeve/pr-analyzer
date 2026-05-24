@@ -14,6 +14,7 @@ type Input struct {
 	Additions int
 	Deletions int
 	Files     []File
+	Config    Config
 }
 
 type File struct {
@@ -27,23 +28,144 @@ type LOC struct {
 }
 
 type Signals struct {
-	LOC              LOC
-	TestsTouched     bool
-	ManifestsTouched []string
-	Languages        []string
+	LOC               LOC
+	TestsTouched      bool
+	ManifestsTouched  []string
+	Languages         []string
+	RiskyPathsTouched []string
+	// ExceedsMaxLOC is true iff Config.MaxLOC was set (>0) and
+	// LOC.Total exceeds it (strict greater-than).
+	ExceedsMaxLOC bool
+	// MaxLOCThreshold echoes Config.MaxLOC so the renderer can report it
+	// alongside the bullet. Zero when no opinion is configured.
+	MaxLOCThreshold int
+	// LanguagesByPosture buckets detected programming languages by the
+	// project's posture. Non-programming languages (Markdown, YAML, etc.)
+	// never appear here. Zero-value when no posture lists are configured.
+	LanguagesByPosture LanguagesByPosture
+}
+
+// LanguagesByPosture buckets detected languages by the project's
+// posture from Config.Languages.
+type LanguagesByPosture struct {
+	// Preferred contains languages present in Config.Languages.Preferred.
+	Preferred []string
+	// Allowed contains languages in Config.Languages.Allowed that are NOT
+	// also in Preferred.
+	Allowed []string
+	// Anomalous contains detected programming languages absent from both
+	// Preferred and Allowed.
+	Anomalous []string
 }
 
 func Collect(in Input) Signals {
-	return Signals{
-		LOC: LOC{
-			Additions: in.Additions,
-			Deletions: in.Deletions,
-			Total:     in.Additions + in.Deletions,
-		},
-		TestsTouched:     anyTestFile(in.Files),
-		ManifestsTouched: touchedManifests(in.Files),
-		Languages:        detectLanguages(in.Files),
+	loc := LOC{
+		Additions: in.Additions,
+		Deletions: in.Deletions,
+		Total:     in.Additions + in.Deletions,
 	}
+	exceeds, threshold := deriveMaxLOC(loc.Total, in.Config.MaxLOC)
+	languages := detectLanguages(in.Files)
+	return Signals{
+		LOC:                loc,
+		TestsTouched:       anyTestFile(in.Files),
+		ManifestsTouched:   touchedManifests(in.Files),
+		Languages:          languages,
+		RiskyPathsTouched:  touchedRiskyPaths(in.Files, in.Config.RiskyPaths),
+		ExceedsMaxLOC:      exceeds,
+		MaxLOCThreshold:    threshold,
+		LanguagesByPosture: bucketLanguages(languages, in.Config.Languages),
+	}
+}
+
+// deriveMaxLOC reports whether the PR's total LOC exceeds the
+// configured threshold. An unset (zero) threshold means "no opinion"
+// and never produces a signal.
+func deriveMaxLOC(total, threshold int) (exceeds bool, echoed int) {
+	if threshold <= 0 {
+		return false, 0
+	}
+	return total > threshold, threshold
+}
+
+// programmingLanguages is the subset of detected languages subject to
+// posture analysis. Data / markup / build-config languages (Markdown,
+// YAML, JSON, HTML, CSS, Dockerfile, Makefile) are intentionally
+// absent — they never produce anomaly signals regardless of project
+// posture.
+var programmingLanguages = map[string]struct{}{
+	"Go":         {},
+	"JavaScript": {},
+	"TypeScript": {},
+	"Python":     {},
+	"Rust":       {},
+	"Ruby":       {},
+	"Java":       {},
+	"Kotlin":     {},
+	"Swift":      {},
+	"C":          {},
+	"C++":        {},
+	"C#":         {},
+	"Shell":      {},
+}
+
+func isProgrammingLanguage(name string) bool {
+	_, ok := programmingLanguages[name]
+	return ok
+}
+
+// bucketLanguages partitions the detected languages by the project's
+// posture. Zero-value LanguageConfig (no preferred or allowed lists)
+// returns a zero-value LanguagesByPosture: the project has expressed no
+// opinion and the renderer should not emit posture bullets.
+func bucketLanguages(detected []string, cfg LanguageConfig) LanguagesByPosture {
+	if len(cfg.Preferred) == 0 && len(cfg.Allowed) == 0 {
+		return LanguagesByPosture{}
+	}
+	preferred := stringSet(cfg.Preferred)
+	allowed := stringSet(cfg.Allowed)
+	var out LanguagesByPosture
+	for _, lang := range detected {
+		if !isProgrammingLanguage(lang) {
+			continue
+		}
+		if _, ok := preferred[lang]; ok {
+			out.Preferred = append(out.Preferred, lang)
+		} else if _, ok := allowed[lang]; ok {
+			out.Allowed = append(out.Allowed, lang)
+		} else {
+			out.Anomalous = append(out.Anomalous, lang)
+		}
+	}
+	return out
+}
+
+func stringSet(s []string) map[string]struct{} {
+	m := make(map[string]struct{}, len(s))
+	for _, v := range s {
+		m[v] = struct{}{}
+	}
+	return m
+}
+
+// touchedRiskyPaths returns the PR file paths that match one of the
+// configured prefixes. Match semantics: a pattern P matches a file path
+// F iff P == F or P + "/" is a prefix of F. A file matching multiple
+// patterns is reported once. Output preserves file-list order.
+func touchedRiskyPaths(files []File, patterns []string) []string {
+	if len(patterns) == 0 {
+		return nil
+	}
+	var out []string
+	for _, f := range files {
+		for _, p := range patterns {
+			if f.Path == p || strings.HasPrefix(f.Path, p+"/") {
+				out = append(out, f.Path)
+				break
+			}
+		}
+	}
+	return out
 }
 
 var manifestBasenames = map[string]struct{}{
