@@ -404,6 +404,20 @@ func TestCollect_LanguagesByPosture(t *testing.T) {
 			},
 		},
 		{
+			name: "Lua buckets as a programming language (anomalous when not in posture)",
+			files: []codeshape.File{
+				{Path: "main.go"},
+				{Path: "kong/plugins/foo/handler.lua"},
+			},
+			config: codeshape.LanguageConfig{
+				Preferred: []string{"Go"},
+			},
+			want: want{
+				preferred: []string{"Go"},
+				anomalous: []string{"Lua"},
+			},
+		},
+		{
 			name:  "language in preferred but not allowed still buckets as preferred",
 			files: []codeshape.File{{Path: "main.go"}},
 			config: codeshape.LanguageConfig{
@@ -510,6 +524,7 @@ func TestCollect_Languages(t *testing.T) {
 		{"Dockerfile in subdir", []codeshape.File{{Path: "docker/Dockerfile"}}, []string{"Dockerfile"}},
 		{"Makefile basename", []codeshape.File{{Path: "Makefile"}}, []string{"Makefile"}},
 		{"Shell .sh", []codeshape.File{{Path: "scripts/run.sh"}}, []string{"Shell"}},
+		{"Lua .lua", []codeshape.File{{Path: "kong/plugins/foo/handler.lua"}}, []string{"Lua"}},
 		{"Markdown .md", []codeshape.File{{Path: "README.md"}}, []string{"Markdown"}},
 		{"YAML .yaml and .yml merge", []codeshape.File{
 			{Path: ".github/workflows/ci.yml"},

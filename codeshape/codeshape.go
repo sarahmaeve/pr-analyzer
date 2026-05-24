@@ -114,6 +114,7 @@ var programmingLanguages = map[string]struct{}{
 	"C++":        {},
 	"C#":         {},
 	"Shell":      {},
+	"Lua":        {},
 }
 
 func isProgrammingLanguage(name string) bool {
@@ -297,6 +298,7 @@ var languageByExt = map[string]string{
 	".cs":       "C#",
 	".sh":       "Shell",
 	".bash":     "Shell",
+	".lua":      "Lua",
 	".md":       "Markdown",
 	".markdown": "Markdown",
 	".yml":      "YAML",
