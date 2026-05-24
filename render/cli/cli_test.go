@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -182,44 +183,76 @@ languages: Go
 	}
 }
 
-// TestRender_HandlesExtremeValuesWithoutPanic guards against integer
-// overflow in the bar-scale math. A hostile or buggy fixture can return
-// arbitrarily large additions/deletions; the renderer must not panic.
-func TestRender_HandlesExtremeValuesWithoutPanic(t *testing.T) {
+// TestRender_BoundaryAndExtremeValues pins down the renderer's behavior at
+// math.MaxInt (must not panic; bar must be omitted past what scale=1000
+// can fit) and at negative inputs (must clamp the bar to [] but reflect
+// the raw counts on the numeric line). Exact-output comparison so a
+// regression to the old "WithoutPanic"-only weak assertion can't sneak
+// through.
+func TestRender_BoundaryAndExtremeValues(t *testing.T) {
 	t.Parallel()
+
+	const (
+		number = 1
+		author = "u"
+		urlStr = "https://example.test/x/y/pull/1"
+	)
+	header := fmt.Sprintf("PR #%d %s %s\n", number, author, urlStr)
+	bullets := "no tests touched\nno dependency manifest touched\n"
 
 	cases := []struct {
 		name      string
 		additions int
 		deletions int
+		want      string
 	}{
-		{"both at math.MaxInt", math.MaxInt, math.MaxInt},
-		{"additions at math.MaxInt, deletions zero", math.MaxInt, 0},
-		{"deletions at math.MaxInt, additions zero", 0, math.MaxInt},
-		{"both near math.MaxInt (sum overflows)", math.MaxInt - 1, math.MaxInt - 1},
-		{"negative inputs (defensive)", -5, -10},
+		{
+			name:      "both at math.MaxInt — bar omitted",
+			additions: math.MaxInt,
+			deletions: math.MaxInt,
+			want:      header + fmt.Sprintf("adds: %d  deletes: %d  files: 0\n", math.MaxInt, math.MaxInt) + bullets,
+		},
+		{
+			name:      "additions at math.MaxInt, deletions zero — bar omitted",
+			additions: math.MaxInt,
+			deletions: 0,
+			want:      header + fmt.Sprintf("adds: %d  deletes: 0  files: 0\n", math.MaxInt) + bullets,
+		},
+		{
+			name:      "deletions at math.MaxInt, additions zero — bar omitted",
+			additions: 0,
+			deletions: math.MaxInt,
+			want:      header + fmt.Sprintf("adds: 0  deletes: %d  files: 0\n", math.MaxInt) + bullets,
+		},
+		{
+			name:      "both near math.MaxInt (sum would overflow) — bar omitted",
+			additions: math.MaxInt - 1,
+			deletions: math.MaxInt - 1,
+			want:      header + fmt.Sprintf("adds: %d  deletes: %d  files: 0\n", math.MaxInt-1, math.MaxInt-1) + bullets,
+		},
+		{
+			name:      "negative inputs clamp bar to [] but preserve numeric line",
+			additions: -5,
+			deletions: -10,
+			want:      header + "[]\nadds: -5  deletes: -10  files: 0\n" + bullets,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			in := analyzer.Analysis{
 				PR: analyzer.PR{
-					Ref:    analyzer.PRRef{Owner: "x", Repo: "y", Number: 1},
-					Author: "u",
-					URL:    "https://example.test/x/y/pull/1",
+					Ref:    analyzer.PRRef{Owner: "x", Repo: "y", Number: number},
+					Author: author,
+					URL:    urlStr,
 				},
 				CodeShape: codeshape.Signals{
 					LOC: codeshape.LOC{Additions: tc.additions, Deletions: tc.deletions},
 				},
 			}
-			// The contract: do not panic. Output is best-effort for these values;
-			// the bar should be omitted whenever the values exceed what scale=1000 can fit.
 			got := cli.Render(in)
-			if strings.HasPrefix(got, "") && got == "" {
-				t.Fatal("Render returned empty string")
-			}
-			if !strings.Contains(got, "PR #1 u") {
-				t.Errorf("missing header line:\n%s", got)
+			if got != tc.want {
+				t.Errorf("Render() mismatch\n--- want ---\n%s--- got ---\n%s", tc.want, got)
 			}
 		})
 	}

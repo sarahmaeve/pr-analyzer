@@ -2,9 +2,12 @@ package github_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -173,6 +176,101 @@ func TestClient_FetchPR_RejectsOffHostNextLink(t *testing.T) {
 	}
 }
 
+func TestClient_FetchPR_MalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not valid JSON at all`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+	_, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	if err == nil {
+		t.Fatal("expected decode error, got nil")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Errorf("error %v does not mention decode failure", err)
+	}
+}
+
+func TestClient_FetchPR_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	// Server blocks until the client cancels — proves the client honors
+	// ctx mid-flight rather than waiting for the server to respond.
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already-cancelled context; the first request must fail immediately
+
+	_, err := c.FetchPR(ctx, analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v does not wrap context.Canceled", err)
+	}
+}
+
+func TestClient_FetchPR_SendsRequiredHeaders(t *testing.T) {
+	t.Parallel()
+
+	type seenReq struct {
+		path    string
+		accept  string
+		version string
+	}
+	var (
+		mu       sync.Mutex
+		captured []seenReq
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		captured = append(captured, seenReq{
+			path:    r.URL.Path,
+			accept:  r.Header.Get("Accept"),
+			version: r.Header.Get("X-GitHub-Api-Version"),
+		})
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/files") {
+			fmt.Fprintln(w, `[]`)
+			return
+		}
+		fmt.Fprintln(w, `{"number":1,"title":"x","html_url":"u","state":"open","draft":false,"user":{"login":"u"},"base":{"ref":"main"},"head":{"ref":"feat"},"additions":0,"deletions":0,"changed_files":0,"labels":[],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+	if _, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1}); err != nil {
+		t.Fatalf("FetchPR: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) < 2 {
+		t.Fatalf("captured %d requests, want at least 2 (PR detail + files)", len(captured))
+	}
+	// Every outbound request must carry both headers — checking only the
+	// last would let a regression that drops them on, say, paginated
+	// requests slip through.
+	for _, req := range captured {
+		if req.accept != "application/vnd.github+json" {
+			t.Errorf("%s: Accept = %q, want %q", req.path, req.accept, "application/vnd.github+json")
+		}
+		if req.version != "2022-11-28" {
+			t.Errorf("%s: X-GitHub-Api-Version = %q, want %q", req.path, req.version, "2022-11-28")
+		}
+	}
+}
+
 func TestClient_FetchPR_404Error(t *testing.T) {
 	t.Parallel()
 
@@ -186,5 +284,11 @@ func TestClient_FetchPR_404Error(t *testing.T) {
 	_, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "x", Repo: "y", Number: 1})
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	// The error should identify the HTTP status — a regression that swallowed
+	// non-200s and returned an empty PR would still produce "some error" but
+	// would hide the cause.
+	if !strings.Contains(err.Error(), "404") {
+		t.Errorf("error %v does not mention status 404", err)
 	}
 }

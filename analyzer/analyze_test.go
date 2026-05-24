@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
+	"github.com/sarahmaeve/pr-analyzer/codeshape"
 )
 
 type fakeSource struct {
@@ -18,6 +19,11 @@ func (f fakeSource) FetchPR(_ context.Context, _ analyzer.PRRef) (analyzer.PR, e
 	return f.pr, f.err
 }
 
+// TestAnalyze_translatesPRtoInputAndPopulatesCodeShape exercises every
+// codeshape signal that the orchestrator is responsible for flowing
+// through. A regression in the PR→codeshape.Input translation (e.g.
+// dropping the Files slice, swapping additions/deletions) must surface
+// here.
 func TestAnalyze_translatesPRtoInputAndPopulatesCodeShape(t *testing.T) {
 	t.Parallel()
 
@@ -29,10 +35,11 @@ func TestAnalyze_translatesPRtoInputAndPopulatesCodeShape(t *testing.T) {
 			URL:          "https://github.com/x/y/pull/1",
 			Additions:    100,
 			Deletions:    50,
-			ChangedFiles: 2,
+			ChangedFiles: 3,
 			Files: []analyzer.PRFile{
 				{Path: "main.go", Additions: 80, Deletions: 30},
 				{Path: "main_test.go", Additions: 20, Deletions: 20},
+				{Path: "go.mod", Additions: 1, Deletions: 0},
 			},
 		},
 	}
@@ -45,20 +52,21 @@ func TestAnalyze_translatesPRtoInputAndPopulatesCodeShape(t *testing.T) {
 	if got.PR.Author != "u" {
 		t.Errorf("PR.Author = %q, want %q", got.PR.Author, "u")
 	}
-	if got.PR.ChangedFiles != 2 {
-		t.Errorf("PR.ChangedFiles = %d, want 2", got.PR.ChangedFiles)
+	if got.PR.ChangedFiles != 3 {
+		t.Errorf("PR.ChangedFiles = %d, want 3", got.PR.ChangedFiles)
 	}
 
-	wantLOC := analyzer.Analysis{}.CodeShape.LOC
-	wantLOC.Additions = 100
-	wantLOC.Deletions = 50
-	wantLOC.Total = 150
+	wantLOC := codeshape.LOC{Additions: 100, Deletions: 50, Total: 150}
 	if got.CodeShape.LOC != wantLOC {
 		t.Errorf("CodeShape.LOC = %+v, want %+v", got.CodeShape.LOC, wantLOC)
 	}
 
 	if !got.CodeShape.TestsTouched {
 		t.Errorf("CodeShape.TestsTouched = false, want true (main_test.go is a Go test)")
+	}
+
+	if !slices.Equal(got.CodeShape.ManifestsTouched, []string{"go.mod"}) {
+		t.Errorf("CodeShape.ManifestsTouched = %v, want [go.mod]", got.CodeShape.ManifestsTouched)
 	}
 
 	if !slices.Equal(got.CodeShape.Languages, []string{"Go"}) {

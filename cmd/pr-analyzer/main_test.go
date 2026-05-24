@@ -9,10 +9,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 )
+
+// buildBinary compiles cmd/pr-analyzer into t.TempDir() and returns the
+// path. Marked t.Helper so failure points report at the caller's line.
+func buildBinary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "pr-analyzer")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, out)
+	}
+	return bin
+}
 
 func TestParsePRRef(t *testing.T) {
 	t.Parallel()
@@ -46,31 +59,45 @@ func TestParsePRRef(t *testing.T) {
 func TestParsePRRef_Errors(t *testing.T) {
 	t.Parallel()
 
-	tests := []string{
-		// Structural errors
-		"",
-		"no-separators",
-		"owner/repo-no-hash",
-		"#-leading-hash/and-slash",
-		"owner/repo#not-a-number",
-		"https://gitlab.com/x/y/pull/1",
-		// Character validation on Owner/Repo
-		"a b/c#1",      // space in owner
-		"o\n/r#1",      // newline in owner
-		"o/r/extra#1",  // extra slash leaks into repo
-		"o/../r#1",     // path traversal attempt
-		"o%2Fevil/r#1", // URL-encoded slash in owner
-		"o/r;evil#1",   // unexpected punctuation
-		"<script>/r#1", // HTML-injection shape
-		// Number must be positive
-		"o/r#-5",
-		"o/r#0",
+	// Each case asserts which error category the parser landed in, not just
+	// "err != nil". A regression that produces an error for the wrong reason
+	// (e.g., structural check catches an input that should have been caught
+	// by character validation) will fail here even though the input still
+	// produces some error.
+	tests := []struct {
+		in              string
+		wantErrContains string
+	}{
+		// Structural errors — caller failed to provide a recognizable form.
+		{"", "usage:"},
+		{"no-separators", "usage:"},
+		{"owner/repo-no-hash", "usage:"},
+		{"#-leading-hash/and-slash", "usage:"},
+		{"https://gitlab.com/x/y/pull/1", "usage:"},
+		// Number parsing inside the short-form parser.
+		{"owner/repo#not-a-number", "invalid PR number after"},
+		// Character validation on Owner.
+		{"a b/c#1", "invalid owner"},
+		{"o\n/r#1", "invalid owner"},
+		{"o%2Fevil/r#1", "invalid owner"},
+		{"<script>/r#1", "invalid owner"},
+		// Character validation on Repo.
+		{"o/r/extra#1", "invalid repo"},
+		{"o/../r#1", "invalid repo"},
+		{"o/r;evil#1", "invalid repo"},
+		// Number range — Atoi succeeds but validateRef rejects.
+		{"o/r#-5", "PR number must be positive"},
+		{"o/r#0", "PR number must be positive"},
 	}
 	for _, tc := range tests {
-		t.Run(tc, func(t *testing.T) {
+		t.Run(tc.in, func(t *testing.T) {
 			t.Parallel()
-			if _, err := parsePRRef(tc); err == nil {
-				t.Errorf("parsePRRef(%q) returned nil error, want error", tc)
+			_, err := parsePRRef(tc.in)
+			if err == nil {
+				t.Fatalf("parsePRRef(%q) returned nil, want error containing %q", tc.in, tc.wantErrContains)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) {
+				t.Errorf("parsePRRef(%q) error = %v, want substring %q", tc.in, err, tc.wantErrContains)
 			}
 		})
 	}
@@ -164,14 +191,8 @@ func TestAuthTransport_DoesNotMutateRequest(t *testing.T) {
 func TestSmoke_PR144(t *testing.T) {
 	t.Parallel()
 
-	// Build the binary.
-	bin := filepath.Join(t.TempDir(), "pr-analyzer")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build failed: %v\n%s", err, out)
-	}
+	bin := buildBinary(t)
 
-	// Fixture server that serves PR #144's captured JSON.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/sarahmaeve/signatory/pulls/144", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -184,26 +205,16 @@ func TestSmoke_PR144(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	// Run the binary against the fixture server. We build the child's env
-	// from an explicit allowlist instead of inheriting os.Environ() so that
-	// a real GITHUB_TOKEN in the test runner's environment cannot leak into
-	// the subprocess.
+	// Run the binary against the fixture server. Env is an explicit allowlist
+	// rather than os.Environ() so a real GITHUB_TOKEN in the parent cannot
+	// leak into the child; the dedicated TestSmoke_DoesNotInheritParentGitHubToken
+	// test verifies that property end-to-end.
 	cmd := exec.Command(bin, "sarahmaeve/signatory#144")
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 		"GITHUB_TOKEN=smoke-test-token",
 		"GITHUB_API_BASE_URL=" + srv.URL,
-	}
-	// Defensive: only one GITHUB_TOKEN entry — no inheritance leak.
-	var tokenEntries int
-	for _, e := range cmd.Env {
-		if strings.HasPrefix(e, "GITHUB_TOKEN=") {
-			tokenEntries++
-		}
-	}
-	if tokenEntries != 1 {
-		t.Fatalf("cmd.Env has %d GITHUB_TOKEN entries; want exactly 1", tokenEntries)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -217,13 +228,13 @@ func TestSmoke_PR144(t *testing.T) {
 	// Each expected substring is something the deterministic pipeline must produce
 	// given the captured PR #144 fixture.
 	wants := []string{
-		"PR #144 sarahmaeve https://github.com/sarahmaeve/signatory/pull/144",
+		"PR #144 sarahmaeve https://github.com/sarahmaeve/signatory/pull/144\n",
 		// 5631 adds + 220 deletes → scale 300, ceil(5631/300)=19 plus ceil(220/300)=1.
-		"[+++++++++++++++++++-]  scale: 300 LOC/glyph",
-		"adds: 5631  deletes: 220  files: 27",
-		// signatory has at least one .go file in the changed set, so Go is in the languages line.
-		"languages: ",
-		"Go",
+		"[+++++++++++++++++++-]  scale: 300 LOC/glyph\n",
+		"adds: 5631  deletes: 220  files: 27\n",
+		"tests touched\n",
+		"no dependency manifest touched\n",
+		"languages: Go, Markdown\n",
 	}
 	for _, want := range wants {
 		if !strings.Contains(out, want) {
@@ -233,5 +244,69 @@ func TestSmoke_PR144(t *testing.T) {
 
 	if !strings.HasSuffix(out, "\n") {
 		t.Errorf("output does not end with newline; last 20 bytes: %q", out[max(0, len(out)-20):])
+	}
+
+	if stderr.Len() != 0 {
+		t.Errorf("expected empty stderr on success, got:\n%s", stderr.String())
+	}
+}
+
+// TestSmoke_DoesNotInheritParentGitHubToken proves the binary's env is
+// built from an explicit allowlist — a real GITHUB_TOKEN in the parent
+// (this test runner's) environment must not be visible to the child.
+//
+// Two distinct checks: (1) cmd.Env contains exactly one GITHUB_TOKEN
+// entry — guards against a regression to append(os.Environ(), ...);
+// (2) the binary's outbound Authorization header is Bearer
+// smoke-test-token and never contains the parent secret — proves the
+// child resolves to the explicit value.
+//
+// Cannot run in parallel: t.Setenv mutates process-global state.
+func TestSmoke_DoesNotInheritParentGitHubToken(t *testing.T) {
+	const parentSecret = "PARENT-TOKEN-MUST-NOT-LEAK"
+	t.Setenv("GITHUB_TOKEN", parentSecret)
+
+	bin := buildBinary(t)
+
+	var capturedAuth atomic.Value
+	capturedAuth.Store("")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth.Store(r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusNotFound) // happy path not needed; we want the captured header
+	}))
+	t.Cleanup(srv.Close)
+
+	cmd := exec.Command(bin, "o/r#1")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"GITHUB_TOKEN=smoke-test-token",
+		"GITHUB_API_BASE_URL=" + srv.URL,
+	}
+
+	// Property 1: cmd.Env contains exactly one GITHUB_TOKEN entry. With the
+	// t.Setenv above guaranteeing the parent has GITHUB_TOKEN=parentSecret,
+	// a regression to append(os.Environ(), ...) would push this to 2.
+	tokenEntries := 0
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "GITHUB_TOKEN=") {
+			tokenEntries++
+		}
+	}
+	if tokenEntries != 1 {
+		t.Errorf("cmd.Env has %d GITHUB_TOKEN entries; want exactly 1 (parent inheritance leak)", tokenEntries)
+	}
+
+	_ = cmd.Run() // we expect a non-zero exit because the fake server returns 404
+
+	// Property 2: the binary used the explicit smoke-test-token and never
+	// the parent's secret. A regression where authTransport falls back to
+	// something other than os.Getenv("GITHUB_TOKEN") would surface here.
+	auth, _ := capturedAuth.Load().(string)
+	if auth != "Bearer smoke-test-token" {
+		t.Errorf("Authorization header = %q, want %q", auth, "Bearer smoke-test-token")
+	}
+	if strings.Contains(auth, parentSecret) {
+		t.Errorf("Authorization header leaked parent secret: %q", auth)
 	}
 }
