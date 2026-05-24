@@ -1,0 +1,70 @@
+# Concept
+
+This is a mechanical analyzer for changelists and pull requests.
+It is inspired by circa-2011 Facebook PR tools, which displayed a quality signal of 100-200 changelists for each daily build. A similar evolution of a product is Phacility's Herald (https://www.phacility.com/phabricator/herald/) which is no longer maintained.
+
+## Tools
+
+Our code is in Go whenever possible.
+We use test-driven development.
+Our product does not directly query LLMs, but provides a signal for both other products and LLMs as needed.
+We need to have the ability to ship this as a separate code module.
+
+## Draft ideas
+
+A PR (pull request) can be evaluated by several measures.
+
+### Code Shape
+
+- How many lines of code (LOCs) is the PR? Are those mostly additions? Are they mostly deletions?
+
+- Does the PR have adequate test coverage?
+
+- Is the PR adding a new dependency?
+
+- Does the PR touch dangerous or risky areas of the codebase, like a billing platform, a core data storage layer, business or serving logic, etc.?
+
+### Engineer Profile
+
+- What is the tenure of this engineer at the company? Are they an intern? Did they just join?
+
+- For an open source project, has this engineer had a PR accepted already?
+
+- Do we have any signal as to the diligence, quality, or bona fides of this engineer?
+
+- Is this engineer in an OWNERS file or similar entry that indicates they are competent and responsible for this area of the project?
+
+- Is engineer on a restricted list, where their work needs to be further scrutinized because of previous behavior? (Circa-2011, this was the internal Facebook "karma" system)
+
+### Project or Organizational Ruleset
+
+- Does the org or project have a preferred or mandatory set of programming languages or technologies? Does the PR stick to those?
+
+- Is the PR using banned languages or technologies? Implementing in ways that are identified as antipatterns?
+
+- Is the PR larger than the maximum LOC size the org has set?
+
+## Customizable
+
+We need to allow users to customize and connect to other sources of information. For example, a user may want to query their own employee database to answer questions about an engineer's tenure.
+
+For open-source software projects, which we can dogfood test, we should define these sub-connectors as configurable elements. For example, we should ship with support for GitHub pull requests.
+
+A project or organization may have specific needs for linters or testing, and we will need to allow them to configure that -- or at a minimum, not block users from importing our module and using it as a base.
+
+## Output
+
+We should start with two output mechanisms:
+- a single CLI visibility tool, that analyzes a given PR, and makes the state of that PR visible as a horizontal bar showing LOC size, with info below.
+
+An example:
+
+PR #113 Sarah M <email> <link>
+[+++++-----]
+Sarah is in the OWNERS file.
+This code has no unusual shapes.
+This code follows product restrictions.
+13 of Sarah's previous PRs have been accepted, the last merged at DD-MM-YY <link>
+
+where the simple bar graph [++++-----] refers to lines modified, divided into adds and deletes. The scale of this graph should be configurable by project; our initial default should be 100 LOCs per glyph.
+
