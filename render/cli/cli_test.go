@@ -8,6 +8,7 @@ import (
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 	"github.com/sarahmaeve/pr-analyzer/codeshape"
+	"github.com/sarahmaeve/pr-analyzer/engineerprofile"
 	"github.com/sarahmaeve/pr-analyzer/render"
 	"github.com/sarahmaeve/pr-analyzer/render/cli"
 )
@@ -292,6 +293,97 @@ languages allowed: TypeScript
 				t.Errorf("Render() mismatch\n--- want ---\n%s--- got ---\n%s", tc.want, got)
 			}
 		})
+	}
+}
+
+// TestRender_AuthorAssociationInterestingness pins the slice-4
+// renderer rule: the author-association bullet is shown only for
+// "interesting" values. The trusted allowlist (OWNER / MEMBER /
+// COLLABORATOR) and the empty string are hidden because they carry
+// no signal. Everything else surfaces, including unknown future
+// GitHub enum values — over-surfacing beats silently hiding.
+func TestRender_AuthorAssociationInterestingness(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		assoc    string
+		wantLine string // exact line that must appear; empty means must NOT appear
+	}{
+		{"OWNER hidden", "OWNER", ""},
+		{"MEMBER hidden", "MEMBER", ""},
+		{"COLLABORATOR hidden", "COLLABORATOR", ""},
+		{"empty string hidden", "", ""},
+		{"FIRST_TIME_CONTRIBUTOR shown", "FIRST_TIME_CONTRIBUTOR", "author association: FIRST_TIME_CONTRIBUTOR\n"},
+		{"FIRST_TIMER shown", "FIRST_TIMER", "author association: FIRST_TIMER\n"},
+		{"CONTRIBUTOR shown", "CONTRIBUTOR", "author association: CONTRIBUTOR\n"},
+		{"MANNEQUIN shown", "MANNEQUIN", "author association: MANNEQUIN\n"},
+		{"NONE shown", "NONE", "author association: NONE\n"},
+		{"unknown future value shown", "GITHUB_FUTURE_VALUE", "author association: GITHUB_FUTURE_VALUE\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := analyzer.Analysis{
+				PR: analyzer.PR{
+					Ref:    analyzer.PRRef{Owner: "x", Repo: "y", Number: 1},
+					Author: "u",
+					URL:    "https://example.test/x/y/pull/1",
+				},
+				CodeShape: codeshape.Signals{
+					LOC: codeshape.LOC{Additions: 1, Deletions: 0, Total: 1},
+				},
+				EngineerProfile: engineerprofile.Signals{
+					AuthorAssociation: tc.assoc,
+				},
+			}
+			got := cli.Render(in, render.Config{})
+			if tc.wantLine == "" {
+				if strings.Contains(got, "author association:") {
+					t.Errorf("expected NO 'author association:' line for %q, got:\n%s", tc.assoc, got)
+				}
+			} else {
+				if !strings.Contains(got, tc.wantLine) {
+					t.Errorf("missing %q for assoc=%q in output:\n%s", tc.wantLine, tc.assoc, got)
+				}
+			}
+		})
+	}
+}
+
+// TestRender_AuthorAssociationOrdering pins the bullet's position:
+// after agent-config-files-touched, before exceeds-max-LOC. Both
+// neighbors are "what's unusual about this PR" signals — keeping
+// them grouped is the readability rationale.
+func TestRender_AuthorAssociationOrdering(t *testing.T) {
+	t.Parallel()
+
+	in := analyzer.Analysis{
+		PR: analyzer.PR{
+			Ref:    analyzer.PRRef{Owner: "x", Repo: "y", Number: 1},
+			Author: "u",
+			URL:    "https://example.test/x/y/pull/1",
+		},
+		CodeShape: codeshape.Signals{
+			LOC:                     codeshape.LOC{Additions: 1500, Deletions: 0, Total: 1500},
+			AgentConfigPathsTouched: []string{".cursorrules"},
+			ExceedsMaxLOC:           true,
+			MaxLOCThreshold:         1000,
+		},
+		EngineerProfile: engineerprofile.Signals{AuthorAssociation: "FIRST_TIME_CONTRIBUTOR"},
+	}
+	got := cli.Render(in, render.Config{})
+
+	agentIdx := strings.Index(got, "agent-config files touched:")
+	authorIdx := strings.Index(got, "author association:")
+	maxLOCIdx := strings.Index(got, "exceeds max LOC:")
+
+	if agentIdx < 0 || authorIdx < 0 || maxLOCIdx < 0 {
+		t.Fatalf("missing bullet(s) in output:\n%s", got)
+	}
+	if !(agentIdx < authorIdx && authorIdx < maxLOCIdx) {
+		t.Errorf("bullet order wrong: agent-config(%d) < author(%d) < exceeds-max-LOC(%d) expected; output:\n%s",
+			agentIdx, authorIdx, maxLOCIdx, got)
 	}
 }
 

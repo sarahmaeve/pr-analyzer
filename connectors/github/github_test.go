@@ -67,6 +67,10 @@ func TestClient_FetchPR_TrapdoorFixture(t *testing.T) {
 			t.Errorf("Files[%d].Status = %q, want added", i, pr.Files[i].Status)
 		}
 	}
+
+	if pr.AuthorAssociation != "FIRST_TIME_CONTRIBUTOR" {
+		t.Errorf("AuthorAssociation = %q, want FIRST_TIME_CONTRIBUTOR", pr.AuthorAssociation)
+	}
 }
 
 // TestFixture_TrapdoorPatchesMatchHunkHeaders enforces an internal-
@@ -193,6 +197,9 @@ func TestClient_FetchPR_PR144Fixture(t *testing.T) {
 	}
 	if first.Additions != 10 || first.Deletions != 5 {
 		t.Errorf("Files[0] adds/deletes = %d/%d, want 10/5", first.Additions, first.Deletions)
+	}
+	if pr.AuthorAssociation != "OWNER" {
+		t.Errorf("AuthorAssociation = %q, want OWNER", pr.AuthorAssociation)
 	}
 }
 

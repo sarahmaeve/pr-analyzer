@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sarahmaeve/pr-analyzer/codeshape"
+	"github.com/sarahmaeve/pr-analyzer/engineerprofile"
 )
 
 // Option configures a single call to Analyze. The zero set of options
@@ -47,6 +48,9 @@ func Analyze(ctx context.Context, src PRSource, ref PRRef, opts ...Option) (Anal
 			Deletions: pr.Deletions,
 			Files:     files,
 			Config:    o.config.CodeShape,
+		}),
+		EngineerProfile: engineerprofile.Collect(engineerprofile.Input{
+			AuthorAssociation: pr.AuthorAssociation,
 		}),
 		Config: o.config,
 	}, nil

@@ -73,11 +73,37 @@ func Render(a analyzer.Analysis, c render.Config) string {
 		fmt.Fprintf(&b, "agent-config files touched: %s\n", strings.Join(a.CodeShape.AgentConfigPathsTouched, ", "))
 	}
 
+	if isInterestingAuthorAssociation(a.EngineerProfile.AuthorAssociation) {
+		fmt.Fprintf(&b, "author association: %s\n", a.EngineerProfile.AuthorAssociation)
+	}
+
 	if a.CodeShape.ExceedsMaxLOC {
 		fmt.Fprintf(&b, "exceeds max LOC: %d > %d\n", a.CodeShape.LOC.Total, a.CodeShape.MaxLOCThreshold)
 	}
 
 	return b.String()
+}
+
+// trustedAuthorAssociations is the allowlist of values whose
+// presence carries no signal — the contributor has commit/merge
+// rights on the target repo, so the bullet would be noise. Anything
+// not in this set (including the empty string, which we treat as
+// "no data", and any unknown future GitHub enum value) is treated
+// as interesting and surfaces. Empty string is filtered separately
+// in isInterestingAuthorAssociation so a connector that simply did
+// not populate the field never produces a bullet.
+var trustedAuthorAssociations = map[string]struct{}{
+	"OWNER":        {},
+	"MEMBER":       {},
+	"COLLABORATOR": {},
+}
+
+func isInterestingAuthorAssociation(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, trusted := trustedAuthorAssociations[s]
+	return !trusted
 }
 
 func computeBar(adds, deletes, startingScale int) (text string, scale int, omitted bool) {

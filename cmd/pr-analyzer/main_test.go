@@ -345,6 +345,13 @@ func TestSmoke_PR144(t *testing.T) {
 		}
 	}
 
+	// PR #144's author_association is OWNER — in the trusted allowlist,
+	// so the engineer-profile bullet must NOT appear. A regression that
+	// surfaces the bullet for trusted associations would trip here.
+	if strings.Contains(out, "author association:") {
+		t.Errorf("unexpected 'author association:' bullet for trusted OWNER association in output:\n%s", out)
+	}
+
 	if !strings.HasSuffix(out, "\n") {
 		t.Errorf("output does not end with newline; last 20 bytes: %q", out[max(0, len(out)-20):])
 	}
@@ -493,6 +500,10 @@ func TestSmoke_TrapdoorFixture(t *testing.T) {
 		// The signal under test: agent-config bullet naming both paths
 		// in file-list order.
 		"agent-config files touched: .cursorrules, CLAUDE.md\n",
+		// Slice-4 engineer-profile bullet — the trapdoor fixture's
+		// author_association is FIRST_TIME_CONTRIBUTOR (interesting,
+		// not in the trusted allowlist), so the bullet must appear.
+		"author association: FIRST_TIME_CONTRIBUTOR\n",
 	}
 	for _, want := range wants {
 		if !strings.Contains(out, want) {

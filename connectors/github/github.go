@@ -56,20 +56,21 @@ func (c *Client) FetchPR(ctx context.Context, ref analyzer.PRRef) (analyzer.PR, 
 }
 
 type prPayload struct {
-	Number       int            `json:"number"`
-	Title        string         `json:"title"`
-	HTMLURL      string         `json:"html_url"`
-	State        string         `json:"state"`
-	Draft        bool           `json:"draft"`
-	User         userPayload    `json:"user"`
-	Base         refPayload     `json:"base"`
-	Head         refPayload     `json:"head"`
-	Additions    int            `json:"additions"`
-	Deletions    int            `json:"deletions"`
-	ChangedFiles int            `json:"changed_files"`
-	Labels       []labelPayload `json:"labels"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	Number            int            `json:"number"`
+	Title             string         `json:"title"`
+	HTMLURL           string         `json:"html_url"`
+	State             string         `json:"state"`
+	Draft             bool           `json:"draft"`
+	User              userPayload    `json:"user"`
+	Base              refPayload     `json:"base"`
+	Head              refPayload     `json:"head"`
+	Additions         int            `json:"additions"`
+	Deletions         int            `json:"deletions"`
+	ChangedFiles      int            `json:"changed_files"`
+	Labels            []labelPayload `json:"labels"`
+	AuthorAssociation string         `json:"author_association"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 type userPayload struct {
@@ -104,20 +105,21 @@ func (c *Client) fetchPRDetail(ctx context.Context, ref analyzer.PRRef) (analyze
 	}
 
 	return analyzer.PR{
-		Ref:          ref,
-		Title:        p.Title,
-		Author:       p.User.Login,
-		URL:          p.HTMLURL,
-		State:        p.State,
-		Draft:        p.Draft,
-		BaseRef:      p.Base.Ref,
-		HeadRef:      p.Head.Ref,
-		Additions:    p.Additions,
-		Deletions:    p.Deletions,
-		ChangedFiles: p.ChangedFiles,
-		Labels:       labels,
-		CreatedAt:    p.CreatedAt,
-		UpdatedAt:    p.UpdatedAt,
+		Ref:               ref,
+		Title:             p.Title,
+		Author:            p.User.Login,
+		URL:               p.HTMLURL,
+		State:             p.State,
+		Draft:             p.Draft,
+		BaseRef:           p.Base.Ref,
+		HeadRef:           p.Head.Ref,
+		Additions:         p.Additions,
+		Deletions:         p.Deletions,
+		ChangedFiles:      p.ChangedFiles,
+		Labels:            labels,
+		AuthorAssociation: p.AuthorAssociation,
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         p.UpdatedAt,
 	}, nil
 }
 

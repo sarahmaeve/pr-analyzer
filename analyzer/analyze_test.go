@@ -147,6 +147,35 @@ func TestAnalyze_WithConfig_LocalCloneDirFlowsThrough(t *testing.T) {
 	}
 }
 
+// TestAnalyze_populatesEngineerProfile pins slice-4 wiring: a PR
+// carrying AuthorAssociation must surface on Analysis.EngineerProfile
+// verbatim. The collector is pure pass-through in slice 4; the
+// assertion is load-bearing because future slice-5 work will add
+// fields and the AuthorAssociation→AuthorAssociation flow must not
+// regress.
+func TestAnalyze_populatesEngineerProfile(t *testing.T) {
+	t.Parallel()
+
+	ref := analyzer.PRRef{Owner: "x", Repo: "y", Number: 1}
+	src := fakeSource{
+		pr: analyzer.PR{
+			Ref:               ref,
+			Author:            "u",
+			URL:               "https://github.com/x/y/pull/1",
+			AuthorAssociation: "FIRST_TIME_CONTRIBUTOR",
+		},
+	}
+
+	got, err := analyzer.Analyze(context.Background(), src, ref)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if got.EngineerProfile.AuthorAssociation != "FIRST_TIME_CONTRIBUTOR" {
+		t.Errorf("EngineerProfile.AuthorAssociation = %q, want FIRST_TIME_CONTRIBUTOR",
+			got.EngineerProfile.AuthorAssociation)
+	}
+}
+
 func TestAnalyze_propagatesSourceError(t *testing.T) {
 	t.Parallel()
 
