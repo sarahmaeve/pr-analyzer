@@ -8,18 +8,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 )
 
-const defaultBaseURL = "https://api.github.com"
+const (
+	defaultBaseURL          = "https://api.github.com"
+	defaultMaxResponseBytes = int64(32 << 20) // 32 MiB
+)
 
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
+	httpClient       *http.Client
+	baseURL          string
+	maxResponseBytes int64
 }
 
 func NewClient(httpClient *http.Client, baseURL string) *Client {
@@ -30,8 +36,9 @@ func NewClient(httpClient *http.Client, baseURL string) *Client {
 		baseURL = defaultBaseURL
 	}
 	return &Client{
-		httpClient: httpClient,
-		baseURL:    strings.TrimRight(baseURL, "/"),
+		httpClient:       httpClient,
+		baseURL:          strings.TrimRight(baseURL, "/"),
+		maxResponseBytes: defaultMaxResponseBytes,
 	}
 }
 
@@ -156,11 +163,44 @@ func (c *Client) getJSON(ctx context.Context, url string, dest any) (string, err
 		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+	// Cap body reads so a hostile or compromised server cannot OOM the process.
+	// We allow one extra byte so we can detect when the body was exactly at or
+	// beyond the limit.
+	limited := &io.LimitedReader{R: resp.Body, N: c.maxResponseBytes + 1}
+	if err := json.NewDecoder(limited).Decode(dest); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
+	if limited.N <= 0 {
+		return "", fmt.Errorf("response body exceeds %d-byte limit", c.maxResponseBytes)
+	}
 
-	return parseNextLink(resp.Header.Get("Link")), nil
+	next := parseNextLink(resp.Header.Get("Link"))
+	if next != "" {
+		if err := c.validateSameOrigin(next); err != nil {
+			return "", err
+		}
+	}
+	return next, nil
+}
+
+// validateSameOrigin ensures rawURL has the same scheme and host as the
+// client's configured base URL. This blocks a hostile server from
+// redirecting paginated requests — and the Authorization header that the
+// caller's transport may attach — to an attacker-controlled host.
+func (c *Client) validateSameOrigin(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid next-link URL %q: %w", rawURL, err)
+	}
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid client base URL %q: %w", c.baseURL, err)
+	}
+	if u.Scheme != base.Scheme || u.Host != base.Host {
+		return fmt.Errorf("next-link origin %s://%s does not match base %s://%s",
+			u.Scheme, u.Host, base.Scheme, base.Host)
+	}
+	return nil
 }
 
 func parseNextLink(header string) string {

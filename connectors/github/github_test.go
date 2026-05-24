@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
@@ -123,6 +124,52 @@ func TestClient_FetchPR_FollowsPagination(t *testing.T) {
 	}
 	if pr.Files[0].Path != "a.go" || pr.Files[1].Path != "b.go" {
 		t.Errorf("Files = [%q, %q], want [a.go, b.go]", pr.Files[0].Path, pr.Files[1].Path)
+	}
+}
+
+func TestClient_FetchPR_RejectsOffHostNextLink(t *testing.T) {
+	t.Parallel()
+
+	// Stand up a second "attacker" server. The legit server's Link header
+	// will point here. The security property: the client must not contact
+	// this server when it appears in a response from a different origin.
+	var attackerHits atomic.Int32
+	attackerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attackerHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `[]`)
+	}))
+	t.Cleanup(attackerSrv.Close)
+
+	legitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/pulls/1":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `{
+				"number": 1, "title": "x", "html_url": "u", "state": "open", "draft": false,
+				"user": {"login": "u"},
+				"base": {"ref": "main"}, "head": {"ref": "feat"},
+				"additions": 0, "deletions": 0, "changed_files": 0,
+				"labels": [], "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
+			}`)
+		case "/repos/o/r/pulls/1/files":
+			w.Header().Set("Content-Type", "application/json")
+			// Hostile Link header: points at a different host (the attacker server).
+			w.Header().Set("Link", fmt.Sprintf(`<%s/files?page=2>; rel="next"`, attackerSrv.URL))
+			fmt.Fprintln(w, `[]`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(legitSrv.Close)
+
+	c := github.NewClient(legitSrv.Client(), legitSrv.URL)
+	_, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	if err == nil {
+		t.Fatal("expected error when next-link points off-origin, got nil")
+	}
+	if hits := attackerHits.Load(); hits > 0 {
+		t.Errorf("client followed off-origin link to attacker server (%d hits); a token would have traveled there", hits)
 	}
 }
 

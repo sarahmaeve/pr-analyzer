@@ -5,6 +5,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
@@ -56,9 +57,15 @@ func Render(a analyzer.Analysis) string {
 }
 
 func computeBar(adds, deletes int) (text string, scale int, omitted bool) {
+	if adds < 0 {
+		adds = 0
+	}
+	if deletes < 0 {
+		deletes = 0
+	}
 	scale = defaultScale
 	if glyphWidth(adds, deletes, scale) > maxBarGlyphs {
-		scale = autoScale(adds + deletes)
+		scale = autoScale(adds, deletes)
 		if glyphWidth(adds, deletes, scale) > maxBarGlyphs {
 			return "", scale, true
 		}
@@ -70,21 +77,39 @@ func glyphWidth(adds, deletes, scale int) int {
 	return ceilDiv(adds, scale) + ceilDiv(deletes, scale)
 }
 
+// ceilDiv computes ceil(numerator/divisor) for non-negative numerator,
+// using the overflow-safe form (numerator-1)/divisor + 1. The naive
+// (numerator + divisor - 1) / divisor form overflows when numerator is
+// near math.MaxInt and produces a negative result, which panics
+// strings.Repeat downstream.
 func ceilDiv(numerator, divisor int) int {
 	if numerator <= 0 {
 		return 0
 	}
-	return (numerator + divisor - 1) / divisor
+	return (numerator-1)/divisor + 1
 }
 
-func autoScale(total int) int {
-	target := ceilDiv(total, autoScaleSlop)
-	scale := ((target + scaleStep - 1) / scaleStep) * scaleStep
-	if scale < defaultScale {
+// autoScale picks the smallest scale in [defaultScale, maxScale] (stepped by
+// scaleStep) for which the bar would fit. Takes adds and deletes separately
+// so it can detect adds+deletes overflow without ever computing it.
+func autoScale(adds, deletes int) int {
+	// Overflow guard: if adds+deletes would overflow int, the values are
+	// far past anything we can render — return maxScale and let computeBar
+	// observe the bar is still too wide.
+	if adds > math.MaxInt-deletes {
+		return maxScale
+	}
+	total := adds + deletes
+	if total <= 0 {
 		return defaultScale
 	}
-	if scale > maxScale {
+	target := ceilDiv(total, autoScaleSlop)
+	if target >= maxScale {
 		return maxScale
+	}
+	scale := ((target-1)/scaleStep + 1) * scaleStep
+	if scale < defaultScale {
+		return defaultScale
 	}
 	return scale
 }

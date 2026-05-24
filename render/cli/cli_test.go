@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -176,6 +177,49 @@ languages: Go
 			got := cli.Render(tc.in)
 			if got != tc.want {
 				t.Errorf("Render() mismatch\n--- want ---\n%s--- got ---\n%s", tc.want, got)
+			}
+		})
+	}
+}
+
+// TestRender_HandlesExtremeValuesWithoutPanic guards against integer
+// overflow in the bar-scale math. A hostile or buggy fixture can return
+// arbitrarily large additions/deletions; the renderer must not panic.
+func TestRender_HandlesExtremeValuesWithoutPanic(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		additions int
+		deletions int
+	}{
+		{"both at math.MaxInt", math.MaxInt, math.MaxInt},
+		{"additions at math.MaxInt, deletions zero", math.MaxInt, 0},
+		{"deletions at math.MaxInt, additions zero", 0, math.MaxInt},
+		{"both near math.MaxInt (sum overflows)", math.MaxInt - 1, math.MaxInt - 1},
+		{"negative inputs (defensive)", -5, -10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := analyzer.Analysis{
+				PR: analyzer.PR{
+					Ref:    analyzer.PRRef{Owner: "x", Repo: "y", Number: 1},
+					Author: "u",
+					URL:    "https://example.test/x/y/pull/1",
+				},
+				CodeShape: codeshape.Signals{
+					LOC: codeshape.LOC{Additions: tc.additions, Deletions: tc.deletions},
+				},
+			}
+			// The contract: do not panic. Output is best-effort for these values;
+			// the bar should be omitted whenever the values exceed what scale=1000 can fit.
+			got := cli.Render(in)
+			if strings.HasPrefix(got, "") && got == "" {
+				t.Fatal("Render returned empty string")
+			}
+			if !strings.Contains(got, "PR #1 u") {
+				t.Errorf("missing header line:\n%s", got)
 			}
 		})
 	}
