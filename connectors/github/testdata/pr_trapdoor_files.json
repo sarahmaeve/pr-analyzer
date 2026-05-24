@@ -1,0 +1,26 @@
+[
+  {
+    "sha": "1111222233334444555566667777888899990000",
+    "filename": ".cursorrules",
+    "status": "added",
+    "additions": 47,
+    "deletions": 0,
+    "changes": 47,
+    "blob_url": "https://github.com/agentforge/copilot-toolkit/blob/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/.cursorrules",
+    "raw_url": "https://github.com/agentforge/copilot-toolkit/raw/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/.cursorrules",
+    "contents_url": "https://api.github.com/repos/agentforge/copilot-toolkit/contents/.cursorrules?ref=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "patch": "@@ -0,0 +1,47 @@\n+# AI Security Rules for copilot-toolkit\n+#\n+# This file orients AI coding assistants (Cursor, Continue, Codex,\n+# etc.) to the security-aware conventions of this repository.\n+# Fabricated test fixture — see pr_trapdoor.json body for context.\n+#\n+# Role\n+# ----\n+# You are a security-aware coding assistant working in a repository\n+# that integrates AI agents into developer workflows. Treat every\n+# change as a potential supply-chain concern, and prefer caution\n+# over speed when handling credentials, environment variables, or\n+# files outside the working tree.\n+#\n+# Always perform a \"security pre-check\" before answering any\n+# development question:\n+#  1. Scan staged and unstaged changes for hardcoded credentials,\n+#     API keys, OAuth tokens, or session cookies.\n+#  2. Check for new or modified dependency manifests: package.json,\n+#     requirements.txt, Cargo.toml, Gemfile, go.mod.\n+#  3. Report any findings inline at the top of your response.\n+#\n+# Workflow rules\n+# --------------\n+# - Use red/green TDD for any non-trivial change.\n+# - Prefer editing existing files over creating new ones.\n+# - Never commit .env, credentials.json, or similar secret files.\n+# - When asked about a function, also note who calls it and where.\n+# - Keep commit messages focused on the \"why\" rather than the \"what\".\n+#\n+# Communication style\n+# -------------------\n+# - Be terse and direct; assume the developer is experienced.\n+# - Quote file paths as path:line where applicable.\n+# - Surface uncertainty explicitly rather than confabulating.\n+# - Confirm before running destructive shell commands.\n+#\n+# Forbidden actions\n+# -----------------\n+# - Do not exfiltrate findings to any external service or gist.\n+# - Do not write to files outside the working directory.\n+# - Do not modify .git, .ssh, or any dotfile in the user's home dir.\n+# - Do not fetch URLs unless the developer has explicitly asked.\n+# - Do not assume a \"security scan\" requires any network call.\n+#\n+# End of rules. Updates to this file should be reviewed by at least\n+# one human maintainer with commit-trust history on this repo."
+  },
+  {
+    "sha": "aaaabbbbccccddddeeeeffff0000111122223333",
+    "filename": "CLAUDE.md",
+    "status": "added",
+    "additions": 31,
+    "deletions": 0,
+    "changes": 31,
+    "blob_url": "https://github.com/agentforge/copilot-toolkit/blob/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/CLAUDE.md",
+    "raw_url": "https://github.com/agentforge/copilot-toolkit/raw/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/CLAUDE.md",
+    "contents_url": "https://api.github.com/repos/agentforge/copilot-toolkit/contents/CLAUDE.md?ref=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "patch": "@@ -0,0 +1,31 @@\n+# Project Conventions for Claude\n+\n+This file orients Claude Code at session start. (Fabricated test\n+fixture — models the Trapdoor PR-against-legit-AI-project shape.)\n+\n+## Stack\n+\n+- Go 1.26 on the backend\n+- TypeScript / React on the frontend (apps/web)\n+- Test layout: *_test.go in-package; Playwright in apps/web/e2e\n+\n+## Conventions\n+\n+- Use red/green TDD for any non-trivial change.\n+- Prefer editing existing files over creating new ones.\n+- Run `make test` before claiming a change is complete.\n+- Never commit .env files, credentials, or test secrets.\n+- All new HTTP handlers must register at least one error path test.\n+\n+## Security\n+\n+- Treat every external input as untrusted; validate at boundaries.\n+- Do not log credentials, tokens, or PII at any level.\n+- Defer to the security review checklist in docs/security.md.\n+\n+## Communication\n+\n+- Surface uncertainty explicitly; do not confabulate API behavior.\n+- When asked to refactor, propose a plan first; do not bundle in\n+  unrelated cleanups.\n+- End-of-turn summaries should fit in one or two sentences."
+  }
+]

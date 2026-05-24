@@ -207,6 +207,55 @@ exceeds max LOC: 1300 > 1000
 `,
 		},
 		{
+			name: "agent-config bullet fires when paths matched",
+			in: analyzer.Analysis{
+				PR: analyzer.PR{
+					Ref:          analyzer.PRRef{Owner: "trapdoor", Repo: "victim", Number: 7},
+					Author:       "ddjidd564",
+					URL:          "https://github.com/trapdoor/victim/pull/7",
+					ChangedFiles: 2,
+				},
+				CodeShape: codeshape.Signals{
+					LOC:                     codeshape.LOC{Additions: 40, Deletions: 0, Total: 40},
+					AgentConfigPathsTouched: []string{".cursorrules", "CLAUDE.md"},
+				},
+			},
+			want: `PR #7 ddjidd564 https://github.com/trapdoor/victim/pull/7
+[+]
+adds: 40  deletes: 0  files: 2
+no tests touched
+no dependency manifest touched
+agent-config files touched: .cursorrules, CLAUDE.md
+`,
+		},
+		{
+			name: "agent-config bullet appears after risky paths and before exceeds max LOC",
+			in: analyzer.Analysis{
+				PR: analyzer.PR{
+					Ref:          analyzer.PRRef{Owner: "x", Repo: "y", Number: 8},
+					Author:       "u",
+					URL:          "https://github.com/x/y/pull/8",
+					ChangedFiles: 3,
+				},
+				CodeShape: codeshape.Signals{
+					LOC:                     codeshape.LOC{Additions: 1500, Deletions: 0, Total: 1500},
+					RiskyPathsTouched:       []string{"billing/charge.go"},
+					AgentConfigPathsTouched: []string{".cursor/rules"},
+					ExceedsMaxLOC:           true,
+					MaxLOCThreshold:         1000,
+				},
+			},
+			want: `PR #8 u https://github.com/x/y/pull/8
+[+++++++++++++++]
+adds: 1500  deletes: 0  files: 3
+no tests touched
+no dependency manifest touched
+risky paths touched: billing/charge.go
+agent-config files touched: .cursor/rules
+exceeds max LOC: 1500 > 1000
+`,
+		},
+		{
 			name: "languages allowed bucket renders when non-empty",
 			in: analyzer.Analysis{
 				PR: analyzer.PR{

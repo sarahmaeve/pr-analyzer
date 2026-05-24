@@ -2,10 +2,14 @@ package github_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +18,112 @@ import (
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 	"github.com/sarahmaeve/pr-analyzer/connectors/github"
 )
+
+// TestClient_FetchPR_TrapdoorFixture loads the fabricated Trapdoor-
+// shape fixture (agentforge/copilot-toolkit#47) through the connector
+// and asserts every parsed field that the renderer downstream depends
+// on. This is the connector-level mirror of the cmd/pr-analyzer smoke
+// test — it gives a fast signal if a future fixture edit silently
+// breaks the parse path.
+func TestClient_FetchPR_TrapdoorFixture(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/agentforge/copilot-toolkit/pulls/47", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "testdata/pr_trapdoor.json")
+	})
+	mux.HandleFunc("/repos/agentforge/copilot-toolkit/pulls/47/files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "testdata/pr_trapdoor_files.json")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+	pr, err := c.FetchPR(context.Background(), analyzer.PRRef{
+		Owner: "agentforge", Repo: "copilot-toolkit", Number: 47,
+	})
+	if err != nil {
+		t.Fatalf("FetchPR error: %v", err)
+	}
+
+	if pr.Author != "secaudit-helper2026" {
+		t.Errorf("Author = %q, want secaudit-helper2026", pr.Author)
+	}
+	if pr.Additions != 78 || pr.Deletions != 0 {
+		t.Errorf("adds/deletes = %d/%d, want 78/0", pr.Additions, pr.Deletions)
+	}
+	if pr.ChangedFiles != 2 || len(pr.Files) != 2 {
+		t.Fatalf("changed_files=%d / len(Files)=%d, want 2/2", pr.ChangedFiles, len(pr.Files))
+	}
+
+	wantPaths := []string{".cursorrules", "CLAUDE.md"}
+	for i, w := range wantPaths {
+		if pr.Files[i].Path != w {
+			t.Errorf("Files[%d].Path = %q, want %q", i, pr.Files[i].Path, w)
+		}
+		if pr.Files[i].Status != "added" {
+			t.Errorf("Files[%d].Status = %q, want added", i, pr.Files[i].Status)
+		}
+	}
+}
+
+// TestFixture_TrapdoorPatchesMatchHunkHeaders enforces an internal-
+// consistency contract on the trapdoor fixture: every patch entry's
+// unified-diff hunk header (@@ -…,… +…,N @@) must declare a count N
+// that equals the number of '+'-prefixed lines actually present in
+// the patch body. Real GitHub responses are consistent in this way;
+// the fixture must be too, or we end up testing pr-analyzer against
+// shapes it would never see in production traffic.
+func TestFixture_TrapdoorPatchesMatchHunkHeaders(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/pr_trapdoor_files.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var files []struct {
+		Filename string `json:"filename"`
+		Patch    string `json:"patch"`
+	}
+	if err := json.Unmarshal(data, &files); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("fixture has zero file entries")
+	}
+
+	// Matches the "added" hunk header shape: @@ -0,0 +1,N @@.
+	hunkRe := regexp.MustCompile(`^@@ -\d+,\d+ \+\d+,(\d+) @@`)
+	for _, f := range files {
+		m := hunkRe.FindStringSubmatch(f.Patch)
+		if m == nil {
+			t.Errorf("%s: patch does not start with a recognizable hunk header", f.Filename)
+			continue
+		}
+		claimed, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Errorf("%s: hunk header count is not an integer: %v", f.Filename, err)
+			continue
+		}
+
+		// Count '+'-prefixed lines in the body. A real diff's file-marker
+		// line starts with '+++', which the connector strips; the fixture's
+		// patch field carries hunk content only (no '+++' marker), so any
+		// '+' at line-start counts as an added line.
+		actual := 0
+		for line := range strings.SplitSeq(f.Patch, "\n") {
+			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+				actual++
+			}
+		}
+		if actual != claimed {
+			t.Errorf("%s: hunk header claims %d added lines but body contains %d '+' lines",
+				f.Filename, claimed, actual)
+		}
+	}
+}
 
 func TestClient_FetchPR_PR144Fixture(t *testing.T) {
 	t.Parallel()

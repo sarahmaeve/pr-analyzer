@@ -69,6 +69,10 @@ func Render(a analyzer.Analysis, c render.Config) string {
 		fmt.Fprintf(&b, "risky paths touched: %s\n", strings.Join(a.CodeShape.RiskyPathsTouched, ", "))
 	}
 
+	if len(a.CodeShape.AgentConfigPathsTouched) > 0 {
+		fmt.Fprintf(&b, "agent-config files touched: %s\n", strings.Join(a.CodeShape.AgentConfigPathsTouched, ", "))
+	}
+
 	if a.CodeShape.ExceedsMaxLOC {
 		fmt.Fprintf(&b, "exceeds max LOC: %d > %d\n", a.CodeShape.LOC.Total, a.CodeShape.MaxLOCThreshold)
 	}

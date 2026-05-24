@@ -49,6 +49,27 @@ func pr144FixtureServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// prTrapdoorFixtureServer stands up an httptest server that serves
+// the fabricated Trapdoor-shape fixture (agentforge/copilot-toolkit#47)
+// for both the detail and files endpoints. The fixture models the
+// PR-against-legit-AI-project propagation vector from
+// signatory/design/threat-landscape/2026-05-24-trapdoor-crypto-stealer.md.
+func prTrapdoorFixtureServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/agentforge/copilot-toolkit/pulls/47", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "../../connectors/github/testdata/pr_trapdoor.json")
+	})
+	mux.HandleFunc("/repos/agentforge/copilot-toolkit/pulls/47/files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "../../connectors/github/testdata/pr_trapdoor_files.json")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 // TestResolveLocalCloneDir pins the precedence ladder for slice 3:
 // --local-clone-dir CLI flag > local_clone_dir YAML > CWD. Relative
 // flag values resolve against CWD; YAML values have already been
@@ -430,6 +451,57 @@ func TestSmoke_PR144_DiscoversConfig(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "languages preferred: Go\n") {
 		t.Errorf("discovered config not applied; output:\n%s", stdout.String())
+	}
+}
+
+// TestSmoke_TrapdoorFixture exercises the agent-config-touched signal
+// end-to-end against the fabricated Trapdoor-shape PR fixture. The
+// fixture's file list contains exactly .cursorrules + CLAUDE.md (the
+// canonical Trapdoor PR-against-legit-AI-project payload); the binary
+// must render the agent-config bullet naming both paths in
+// file-list order.
+func TestSmoke_TrapdoorFixture(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+	srv := prTrapdoorFixtureServer(t)
+
+	cmd := exec.Command(bin, "agentforge/copilot-toolkit#47")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"GITHUB_TOKEN=smoke-test-token",
+		"GITHUB_API_BASE_URL=" + srv.URL,
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("binary failed: %v\nstderr:\n%s\nstdout:\n%s", err, stderr.String(), stdout.String())
+	}
+
+	out := stdout.String()
+	wants := []string{
+		"PR #47 secaudit-helper2026 https://github.com/agentforge/copilot-toolkit/pull/47\n",
+		// 78 LOC → ceil(78/100)=1 glyph, default scale, no scale notice.
+		"[+]\n",
+		"adds: 78  deletes: 0  files: 2\n",
+		"no tests touched\n",
+		"no dependency manifest touched\n",
+		// CLAUDE.md → Markdown; .cursorrules has no recognized extension.
+		"languages: Markdown\n",
+		// The signal under test: agent-config bullet naming both paths
+		// in file-list order.
+		"agent-config files touched: .cursorrules, CLAUDE.md\n",
+	}
+	for _, want := range wants {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+
+	if stderr.Len() != 0 {
+		t.Errorf("expected empty stderr on success, got:\n%s", stderr.String())
 	}
 }
 

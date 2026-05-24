@@ -33,6 +33,12 @@ type Signals struct {
 	ManifestsTouched  []string
 	Languages         []string
 	RiskyPathsTouched []string
+	// AgentConfigPathsTouched lists PR file paths matching the
+	// AI-agent configuration catalog (.cursorrules, CLAUDE.md, .claude/,
+	// .cursor/, etc.). Built-in, not project-customized: the catalog
+	// names a cross-project threat class (prompt-injection vector via
+	// agent config files), not a per-project preference.
+	AgentConfigPathsTouched []string
 	// ExceedsMaxLOC is true iff Config.MaxLOC was set (>0) and
 	// LOC.Total exceeds it (strict greater-than).
 	ExceedsMaxLOC bool
@@ -67,14 +73,15 @@ func Collect(in Input) Signals {
 	exceeds, threshold := deriveMaxLOC(loc.Total, in.Config.MaxLOC)
 	languages := detectLanguages(in.Files)
 	return Signals{
-		LOC:                loc,
-		TestsTouched:       anyTestFile(in.Files),
-		ManifestsTouched:   touchedManifests(in.Files),
-		Languages:          languages,
-		RiskyPathsTouched:  touchedRiskyPaths(in.Files, in.Config.RiskyPaths),
-		ExceedsMaxLOC:      exceeds,
-		MaxLOCThreshold:    threshold,
-		LanguagesByPosture: bucketLanguages(languages, in.Config.Languages),
+		LOC:                     loc,
+		TestsTouched:            anyTestFile(in.Files),
+		ManifestsTouched:        touchedManifests(in.Files),
+		Languages:               languages,
+		RiskyPathsTouched:       touchedRiskyPaths(in.Files, in.Config.RiskyPaths),
+		AgentConfigPathsTouched: touchedAgentConfig(in.Files),
+		ExceedsMaxLOC:           exceeds,
+		MaxLOCThreshold:         threshold,
+		LanguagesByPosture:      bucketLanguages(languages, in.Config.Languages),
 	}
 }
 
@@ -166,6 +173,58 @@ func touchedRiskyPaths(files []File, patterns []string) []string {
 		}
 	}
 	return out
+}
+
+// agentConfigFilenames catalogs the basenames whose presence in a PR
+// signals an AI-agent configuration touch. Match is case-sensitive: the
+// threat-derived corpus uses these exact spellings, and a case-insensitive
+// match would balloon the false-positive surface (e.g. `claude.md` as a
+// notes file). Catalog is built-in — these are a cross-project threat
+// class, not a per-project preference.
+var agentConfigFilenames = map[string]struct{}{
+	".cursorrules":     {},
+	"CLAUDE.md":        {},
+	"AGENTS.md":        {},
+	"GEMINI.md":        {},
+	".windsurfrules":   {},
+	".aider.conf.yml":  {},
+	".aider.conf.yaml": {},
+}
+
+// agentConfigDirs catalogs path segments that, when present anywhere in a
+// PR file's path, signal an AI-agent configuration touch. Whole-segment
+// match — `.cursor` matches `.cursor/rules` and `apps/web/.cursor/x` but
+// not `.cursor.bak/rules`.
+var agentConfigDirs = map[string]struct{}{
+	".claude":   {},
+	".cursor":   {},
+	".aider":    {},
+	".zed":      {},
+	".codex":    {},
+	".continue": {},
+	".windsurf": {},
+}
+
+func touchedAgentConfig(files []File) []string {
+	var out []string
+	for _, f := range files {
+		if matchesAgentConfig(f.Path) {
+			out = append(out, f.Path)
+		}
+	}
+	return out
+}
+
+func matchesAgentConfig(p string) bool {
+	if _, ok := agentConfigFilenames[path.Base(p)]; ok {
+		return true
+	}
+	for seg := range strings.SplitSeq(p, "/") {
+		if _, ok := agentConfigDirs[seg]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 var manifestBasenames = map[string]struct{}{

@@ -217,6 +217,93 @@ func TestCollect_RiskyPathsTouched(t *testing.T) {
 	}
 }
 
+func TestCollect_AgentConfigPathsTouched(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		files []codeshape.File
+		want  []string
+	}{
+		{"no files", nil, nil},
+		{"no agent config files", []codeshape.File{{Path: "src/foo.go"}}, nil},
+		{".cursorrules at root", []codeshape.File{{Path: ".cursorrules"}}, []string{".cursorrules"}},
+		{"CLAUDE.md at root", []codeshape.File{{Path: "CLAUDE.md"}}, []string{"CLAUDE.md"}},
+		{"CLAUDE.md in subdir", []codeshape.File{{Path: "docs/CLAUDE.md"}}, []string{"docs/CLAUDE.md"}},
+		{"AGENTS.md at root", []codeshape.File{{Path: "AGENTS.md"}}, []string{"AGENTS.md"}},
+		{"GEMINI.md at root", []codeshape.File{{Path: "GEMINI.md"}}, []string{"GEMINI.md"}},
+		{".windsurfrules at root", []codeshape.File{{Path: ".windsurfrules"}}, []string{".windsurfrules"}},
+		{".aider.conf.yml at root", []codeshape.File{{Path: ".aider.conf.yml"}}, []string{".aider.conf.yml"}},
+		{".aider.conf.yaml at root", []codeshape.File{{Path: ".aider.conf.yaml"}}, []string{".aider.conf.yaml"}},
+		{".claude/ dir at root", []codeshape.File{{Path: ".claude/settings.json"}}, []string{".claude/settings.json"}},
+		{".cursor/ dir at root", []codeshape.File{{Path: ".cursor/rules"}}, []string{".cursor/rules"}},
+		{".aider/ dir at root", []codeshape.File{{Path: ".aider/config.yml"}}, []string{".aider/config.yml"}},
+		{".zed/ dir at root", []codeshape.File{{Path: ".zed/settings.json"}}, []string{".zed/settings.json"}},
+		{".codex/ dir at root", []codeshape.File{{Path: ".codex/instructions.md"}}, []string{".codex/instructions.md"}},
+		{".continue/ dir at root", []codeshape.File{{Path: ".continue/config.json"}}, []string{".continue/config.json"}},
+		{".windsurf/ dir at root", []codeshape.File{{Path: ".windsurf/rules.md"}}, []string{".windsurf/rules.md"}},
+		{".cursor/ dir nested mid-path", []codeshape.File{{Path: "frontend/.cursor/rules"}}, []string{"frontend/.cursor/rules"}},
+		{".claude/ dir nested deep", []codeshape.File{{Path: "apps/web/.claude/settings.local.json"}}, []string{"apps/web/.claude/settings.local.json"}},
+		{
+			name: "Trapdoor canonical: PR adds .cursorrules and CLAUDE.md together",
+			files: []codeshape.File{
+				{Path: ".cursorrules"},
+				{Path: "CLAUDE.md"},
+			},
+			want: []string{".cursorrules", "CLAUDE.md"},
+		},
+		{
+			name: "mix preserves file-list order",
+			files: []codeshape.File{
+				{Path: "src/foo.go"},
+				{Path: ".cursor/rules"},
+				{Path: "src/bar.go"},
+				{Path: "CLAUDE.md"},
+			},
+			want: []string{".cursor/rules", "CLAUDE.md"},
+		},
+		{
+			name:  "case sensitive — claude.md is not CLAUDE.md",
+			files: []codeshape.File{{Path: "claude.md"}},
+			want:  nil,
+		},
+		{
+			name:  "case sensitive — .Cursor is not .cursor",
+			files: []codeshape.File{{Path: ".Cursor/rules"}},
+			want:  nil,
+		},
+		{
+			name:  "similar-named non-match — .cursorrules.bak",
+			files: []codeshape.File{{Path: ".cursorrules.bak"}},
+			want:  nil,
+		},
+		{
+			name:  "similar-named non-match — prefix only",
+			files: []codeshape.File{{Path: ".claude.bak/settings.json"}},
+			want:  nil,
+		},
+		{
+			name:  ".vscode is not in catalog (general IDE, not AI-agent)",
+			files: []codeshape.File{{Path: ".vscode/settings.json"}},
+			want:  nil,
+		},
+		{
+			name:  ".idea is not in catalog",
+			files: []codeshape.File{{Path: ".idea/workspace.xml"}},
+			want:  nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := codeshape.Collect(codeshape.Input{Files: tc.files}).AgentConfigPathsTouched
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("Collect(files=%+v).AgentConfigPathsTouched = %v, want %v", tc.files, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCollect_LanguagesByPosture(t *testing.T) {
 	t.Parallel()
 
