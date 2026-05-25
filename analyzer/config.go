@@ -5,9 +5,11 @@ import (
 	"github.com/sarahmaeve/pr-analyzer/render"
 )
 
-// Config is the project-level configuration consumed by Analyze (via
-// WithConfig) and the renderer. Zero values preserve slice-1 defaults
-// throughout.
+// Config is the org-level configuration consumed by Analyze (via
+// WithConfig) and the renderer. "Org" is the unified term for
+// whatever entity publishes the config — an OSS project, a
+// corporation, a team. The same field set applies regardless of who
+// authored it. Zero values preserve slice-1 defaults throughout.
 type Config struct {
 	// LocalCloneDir is an absolute path to the PR's checked-out
 	// repository on disk. pr-analyzer never clones — the caller is

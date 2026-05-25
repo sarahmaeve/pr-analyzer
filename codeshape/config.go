@@ -1,6 +1,6 @@
 package codeshape
 
-// Config drives the codeshape collector's per-project behavior. Zero
+// Config drives the codeshape collector's per-org behavior. Zero
 // values preserve slice-1 defaults: no risky paths, no max-LOC opinion,
 // no language posture.
 type Config struct {

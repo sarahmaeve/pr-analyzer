@@ -57,7 +57,7 @@ const usage = "usage: pr-analyzer <owner/repo | owner/repo#number | https://gith
 //     packaging to one artifact and leaves room for future verbs
 //     (diff, stats, etc.) without further restructuring.
 type cliArgs struct {
-	Config        string `short:"c" type:"existingfile" help:"Path to project config file (overrides walk-up discovery)."`
+	Config        string `short:"c" type:"existingfile" help:"Path to org config file (overrides walk-up + XDG / HOME discovery)."`
 	LocalCloneDir string `name:"local-clone-dir" type:"existingdir" help:"Local checkout of the PR's repository. Defaults to CWD when unset."`
 
 	Scan       scanCmd       `cmd:"" default:"withargs" help:"Analyze a PR or all open PRs in a repo (default)."`
@@ -261,10 +261,12 @@ func newHTTPClient(listMode bool) *http.Client {
 	}
 }
 
-// loadConfig returns the project config and any non-fatal warnings.
-// When the user passed --config, the path must exist (fatal otherwise);
-// otherwise we walk up from startDir looking for pr-analyzer.yaml and
-// accept a miss silently.
+// loadConfig returns the org config and any non-fatal warnings.
+// When the user passed --config, the path must exist (fatal
+// otherwise); otherwise we walk up from startDir looking for
+// pr-analyzer.yaml, then fall through to $XDG_CONFIG_HOME/pr-analyzer
+// and $HOME/.config/pr-analyzer per slice 6, accepting a miss at
+// every level silently.
 func loadConfig(explicitPath, startDir string) (analyzer.Config, []configfile.Warning, error) {
 	if explicitPath != "" {
 		return configfile.Load(explicitPath)

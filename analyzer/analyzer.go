@@ -63,7 +63,7 @@ type Analysis struct {
 	PR              PR                      `json:"pr"`
 	CodeShape       codeshape.Signals       `json:"code_shape"`
 	EngineerProfile engineerprofile.Signals `json:"engineer_profile"`
-	// Config is the project Config that produced this Analysis. It is
+	// Config is the org Config that produced this Analysis. It is
 	// echoed back so renderers and embedders can reference the
 	// configuration without re-loading it. Excluded from JSON output —
 	// it's an input, not a signal, and emitting it would leak the

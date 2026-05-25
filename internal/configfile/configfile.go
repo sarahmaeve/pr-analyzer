@@ -113,11 +113,23 @@ func clampBarScale(cfg *analyzer.Config) []Warning {
 	return nil
 }
 
-// Discover walks up from startDir looking for DefaultConfigFilename,
-// stopping at the filesystem root. The first hit is loaded and
-// returned along with its path. When no file is found, the function
-// returns a zero-value Config and an empty path — silently, since the
-// absence of a project config is a valid state (slice-1 behavior).
+// Discover resolves the org config via the slice-6 ladder:
+//
+//  1. CWD walk-up — walk from startDir upward, looking for
+//     DefaultConfigFilename, stopping at the filesystem root.
+//  2. $XDG_CONFIG_HOME/pr-analyzer/pr-analyzer.yaml, if set.
+//  3. $HOME/.config/pr-analyzer/pr-analyzer.yaml.
+//
+// The first source that exists wins; later sources are not
+// consulted. When nothing is found the function returns a
+// zero-value Config and an empty path — silently, since the absence
+// of an org config is a valid state (slice-1 behavior).
+//
+// The walk-up takes precedence over the user-level paths because
+// repo-local intent is more specific than user-level default: a
+// contributor inside an OSS checkout that ships its own
+// pr-analyzer.yaml should see that project's rules regardless of
+// whatever they have at ~/.config.
 func Discover(startDir string) (analyzer.Config, string, []Warning, error) {
 	dir := startDir
 	for {
@@ -128,10 +140,34 @@ func Discover(startDir string) (analyzer.Config, string, []Warning, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return analyzer.Config{}, "", nil, nil
+			break
 		}
 		dir = parent
 	}
+	if userPath := userConfigPath(os.Getenv("XDG_CONFIG_HOME"), os.Getenv("HOME")); userPath != "" {
+		if _, err := os.Stat(userPath); err == nil {
+			cfg, warnings, err := Load(userPath)
+			return cfg, userPath, warnings, err
+		}
+	}
+	return analyzer.Config{}, "", nil, nil
+}
+
+// userConfigPath returns the user-level org-config path the
+// discovery ladder should try, or "" when neither XDG_CONFIG_HOME
+// nor HOME is set. Pure over its two arguments so tests can drive
+// each branch without mutating process env.
+//
+// Follows the XDG Base Directory Specification: when
+// XDG_CONFIG_HOME is unset, the implied default is $HOME/.config.
+func userConfigPath(xdgConfigHome, home string) string {
+	if xdgConfigHome != "" {
+		return filepath.Join(xdgConfigHome, "pr-analyzer", DefaultConfigFilename)
+	}
+	if home != "" {
+		return filepath.Join(home, ".config", "pr-analyzer", DefaultConfigFilename)
+	}
+	return ""
 }
 
 // typeErrorLineRegex matches the "line N: <rest>" prefix that yaml.v3

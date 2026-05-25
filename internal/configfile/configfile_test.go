@@ -287,13 +287,11 @@ func TestDiscover(t *testing.T) {
 			startSubdir: "a/b",
 			wantFound:   true,
 		},
-		{
-			name:        "no config anywhere returns silently",
-			configAt:    "",
-			startSubdir: "a/b",
-			wantFound:   false,
-		},
 	}
+	// "no config anywhere" lives in TestDiscover_FallsThroughToXDGAndHome,
+	// where the env can be cleared deterministically — without that, a
+	// dev-machine's actual ~/.config/pr-analyzer/pr-analyzer.yaml would
+	// satisfy the discovery and silently flip the test's outcome.
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -338,6 +336,126 @@ func TestDiscover(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDiscover_FallsThroughToXDGAndHome covers the slice-6 ladder
+// past the CWD walk-up. Each sub-case calls t.Setenv to deterministically
+// drive XDG_CONFIG_HOME and HOME, so the tests cannot run in parallel —
+// the trade-off for testing real env handling without abstracting it.
+func TestDiscover_FallsThroughToXDGAndHome(t *testing.T) {
+	t.Run("XDG_CONFIG_HOME wins when set", func(t *testing.T) {
+		// Start from a tempdir with no walk-up hit; the XDG path
+		// must be found and applied.
+		startDir := t.TempDir()
+		xdgRoot := t.TempDir()
+		homeRoot := t.TempDir() // also has no config — proves XDG beats HOME
+
+		xdgConfig := filepath.Join(xdgRoot, "pr-analyzer", "pr-analyzer.yaml")
+		if err := os.MkdirAll(filepath.Dir(xdgConfig), 0o755); err != nil {
+			t.Fatalf("mkdir xdg: %v", err)
+		}
+		if err := os.WriteFile(xdgConfig, []byte("render:\n  bar_scale: 300\n"), 0o600); err != nil {
+			t.Fatalf("write xdg config: %v", err)
+		}
+
+		t.Setenv("XDG_CONFIG_HOME", xdgRoot)
+		t.Setenv("HOME", homeRoot)
+
+		cfg, foundPath, _, err := configfile.Discover(startDir)
+		if err != nil {
+			t.Fatalf("Discover: %v", err)
+		}
+		if foundPath != xdgConfig {
+			t.Errorf("foundPath = %q, want %q", foundPath, xdgConfig)
+		}
+		if cfg.Render.BarScale != 300 {
+			t.Errorf("BarScale = %d, want 300 (XDG config not applied)", cfg.Render.BarScale)
+		}
+	})
+
+	t.Run("HOME fallback when XDG_CONFIG_HOME unset", func(t *testing.T) {
+		// Explicit empty XDG_CONFIG_HOME with HOME set → use $HOME/.config.
+		startDir := t.TempDir()
+		homeRoot := t.TempDir()
+
+		homeConfig := filepath.Join(homeRoot, ".config", "pr-analyzer", "pr-analyzer.yaml")
+		if err := os.MkdirAll(filepath.Dir(homeConfig), 0o755); err != nil {
+			t.Fatalf("mkdir home: %v", err)
+		}
+		if err := os.WriteFile(homeConfig, []byte("render:\n  bar_scale: 400\n"), 0o600); err != nil {
+			t.Fatalf("write home config: %v", err)
+		}
+
+		t.Setenv("XDG_CONFIG_HOME", "")
+		t.Setenv("HOME", homeRoot)
+
+		cfg, foundPath, _, err := configfile.Discover(startDir)
+		if err != nil {
+			t.Fatalf("Discover: %v", err)
+		}
+		if foundPath != homeConfig {
+			t.Errorf("foundPath = %q, want %q", foundPath, homeConfig)
+		}
+		if cfg.Render.BarScale != 400 {
+			t.Errorf("BarScale = %d, want 400 (HOME config not applied)", cfg.Render.BarScale)
+		}
+	})
+
+	t.Run("walk-up beats XDG", func(t *testing.T) {
+		// Both walk-up file and XDG file exist. Walk-up wins — repo-local
+		// intent is more specific than user-level default.
+		startDir := t.TempDir()
+		walkupConfig := filepath.Join(startDir, "pr-analyzer.yaml")
+		if err := os.WriteFile(walkupConfig, []byte("render:\n  bar_scale: 200\n"), 0o600); err != nil {
+			t.Fatalf("write walkup config: %v", err)
+		}
+
+		xdgRoot := t.TempDir()
+		xdgConfig := filepath.Join(xdgRoot, "pr-analyzer", "pr-analyzer.yaml")
+		if err := os.MkdirAll(filepath.Dir(xdgConfig), 0o755); err != nil {
+			t.Fatalf("mkdir xdg: %v", err)
+		}
+		if err := os.WriteFile(xdgConfig, []byte("render:\n  bar_scale: 700\n"), 0o600); err != nil {
+			t.Fatalf("write xdg config: %v", err)
+		}
+
+		t.Setenv("XDG_CONFIG_HOME", xdgRoot)
+		t.Setenv("HOME", t.TempDir())
+
+		cfg, foundPath, _, err := configfile.Discover(startDir)
+		if err != nil {
+			t.Fatalf("Discover: %v", err)
+		}
+		if foundPath != walkupConfig {
+			t.Errorf("foundPath = %q, want %q (walk-up should beat XDG)", foundPath, walkupConfig)
+		}
+		if cfg.Render.BarScale != 200 {
+			t.Errorf("BarScale = %d, want 200 (walk-up file not applied)", cfg.Render.BarScale)
+		}
+	})
+
+	t.Run("nothing found is silent", func(t *testing.T) {
+		// All three sources empty/missing → zero Config, empty path, no error.
+		// Without env clearing the test would silently pick up the dev
+		// machine's actual ~/.config/pr-analyzer/pr-analyzer.yaml.
+		startDir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "does-not-exist"))
+		t.Setenv("HOME", filepath.Join(t.TempDir(), "does-not-exist"))
+
+		cfg, foundPath, warnings, err := configfile.Discover(startDir)
+		if err != nil {
+			t.Fatalf("Discover: %v", err)
+		}
+		if foundPath != "" {
+			t.Errorf("foundPath = %q, want empty", foundPath)
+		}
+		if !reflect.DeepEqual(cfg, analyzer.Config{}) {
+			t.Errorf("Discover returned non-zero Config: %+v", cfg)
+		}
+		if len(warnings) != 0 {
+			t.Errorf("unexpected warnings: %+v", warnings)
+		}
+	})
 }
 
 func TestLoad_LocalCloneDirRelativePath(t *testing.T) {

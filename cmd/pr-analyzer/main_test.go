@@ -541,7 +541,7 @@ func TestSmoke_PR144(t *testing.T) {
 }
 
 // TestSmoke_PR144_WithConfig exercises the --config end-to-end path:
-// project config on disk, binary picks it up, every slice-2 knob that
+// org config on disk, binary picks it up, every slice-2 knob that
 // the config drives produces an observable change in the rendered
 // output.
 func TestSmoke_PR144_WithConfig(t *testing.T) {
@@ -637,6 +637,56 @@ func TestSmoke_PR144_DiscoversConfig(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "languages preferred: Go\n") {
 		t.Errorf("discovered config not applied; output:\n%s", stdout.String())
+	}
+}
+
+// TestSmoke_PR144_DiscoversUserLevelConfig exercises the slice-6
+// fallback: when the CWD walk-up finds no pr-analyzer.yaml, the
+// binary picks up ~/.config/pr-analyzer/pr-analyzer.yaml instead.
+// The child env explicitly clears XDG_CONFIG_HOME so HOME's
+// .config/pr-analyzer path is the one that wins.
+func TestSmoke_PR144_DiscoversUserLevelConfig(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+	srv := pr144FixtureServer(t)
+
+	// $HOME for the child; we'll plant a config under .config/pr-analyzer.
+	homeDir := t.TempDir()
+	userConfigDir := filepath.Join(homeDir, ".config", "pr-analyzer")
+	if err := os.MkdirAll(userConfigDir, 0o755); err != nil {
+		t.Fatalf("mkdir user config dir: %v", err)
+	}
+	cfgBody := "codeshape:\n  languages:\n    preferred: [Go]\n"
+	if err := os.WriteFile(filepath.Join(userConfigDir, "pr-analyzer.yaml"), []byte(cfgBody), 0o600); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+
+	// CWD for the child — a separate tempdir with no walk-up hit, so
+	// discovery falls through to the user-level path.
+	cwd := t.TempDir()
+
+	cmd := exec.Command(bin, "sarahmaeve/signatory#144")
+	cmd.Dir = cwd
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + homeDir,
+		// Explicit empty XDG_CONFIG_HOME: forces the HOME-based
+		// fallback. A leaked XDG_CONFIG_HOME from the parent process
+		// could otherwise point at the dev's real config.
+		"XDG_CONFIG_HOME=",
+		"GITHUB_TOKEN=smoke-test-token",
+		"GITHUB_API_BASE_URL=" + srv.URL,
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("binary failed: %v\nstderr:\n%s\nstdout:\n%s", err, stderr.String(), stdout.String())
+	}
+
+	if !strings.Contains(stdout.String(), "languages preferred: Go\n") {
+		t.Errorf("user-level config not applied; output:\n%s", stdout.String())
 	}
 }
 

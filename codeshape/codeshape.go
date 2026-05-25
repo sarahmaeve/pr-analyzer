@@ -35,9 +35,9 @@ type Signals struct {
 	RiskyPathsTouched []string `json:"risky_paths_touched"`
 	// AgentConfigPathsTouched lists PR file paths matching the
 	// AI-agent configuration catalog (.cursorrules, CLAUDE.md, .claude/,
-	// .cursor/, etc.). Built-in, not project-customized: the catalog
-	// names a cross-project threat class (prompt-injection vector via
-	// agent config files), not a per-project preference.
+	// .cursor/, etc.). Built-in, not org-customized: the catalog names
+	// a cross-codebase threat class (prompt-injection vector via agent
+	// config files), not a per-org preference.
 	AgentConfigPathsTouched []string `json:"agent_config_paths_touched"`
 	// ExceedsMaxLOC is true iff Config.MaxLOC was set (>0) and
 	// LOC.Total exceeds it (strict greater-than).
@@ -180,8 +180,8 @@ func touchedRiskyPaths(files []File, patterns []string) []string {
 // signals an AI-agent configuration touch. Match is case-sensitive: the
 // threat-derived corpus uses these exact spellings, and a case-insensitive
 // match would balloon the false-positive surface (e.g. `claude.md` as a
-// notes file). Catalog is built-in — these are a cross-project threat
-// class, not a per-project preference. See
+// notes file). Catalog is built-in — these are a cross-codebase threat
+// class, not a per-org preference. See
 // signatory/design/threat-landscape/2026-05-24-trapdoor-crypto-stealer.md
 // for the originating Trapdoor PR-against-legit-AI-project vector;
 // .github/copilot-instructions.md is documented at
