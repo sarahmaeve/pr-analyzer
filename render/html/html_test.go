@@ -82,6 +82,24 @@ func fixtureEnvelope() rjson.Envelope {
 			},
 			{
 				PR: analyzer.PR{
+					Ref:               analyzer.PRRef{Owner: "atuinsh", Repo: "atuin", Number: 3100},
+					Title:             "Bump some dependency",
+					Author:            "dependabot[bot]",
+					URL:               "https://github.com/atuinsh/atuin/pull/3100",
+					Additions:         12,
+					Deletions:         8,
+					ChangedFiles:      2,
+					AuthorAssociation: "CONTRIBUTOR",
+				},
+				CodeShape: codeshape.Signals{
+					LOC:              codeshape.LOC{Additions: 12, Deletions: 8, Total: 20},
+					Languages:        []string{"Rust"},
+					ManifestsTouched: []string{"Cargo.lock", "Cargo.toml"},
+				},
+				EngineerProfile: engineerprofile.Signals{AuthorAssociation: "CONTRIBUTOR"},
+			},
+			{
+				PR: analyzer.PR{
 					Ref:               analyzer.PRRef{Owner: "atuinsh", Repo: "atuin", Number: 3200},
 					Title:             "Adds Rust to a Go project",
 					Author:            "polyglot",
@@ -128,7 +146,7 @@ func TestRender_basicShape(t *testing.T) {
 		// Header: repo linked to GitHub, count visible, generated_at + schema.
 		`href="https://github.com/atuinsh/atuin"`,
 		"atuinsh/atuin",
-		"4", // open-PR count
+		"5 OPEN PRS",
 		"2026-05-25T17:34:21Z",
 		"schema v1",
 		// Each PR shows up.
@@ -136,6 +154,7 @@ func TestRender_basicShape(t *testing.T) {
 		"#3429", "drive-by", "Small typo fix",
 		"#3300", "secaudit-2026", "Suspicious: agent-config drop-in",
 		"#3200", "polyglot", "Adds Rust to a Go project",
+		"#3100", "dependabot[bot]", "Bump some dependency",
 		// PR title links to the PR URL.
 		`href="https://github.com/atuinsh/atuin/pull/3500"`,
 		// Author handle links to the GitHub profile.
@@ -278,6 +297,46 @@ func TestRender_locBarPerPRRatio(t *testing.T) {
 	pr3300Section := isolatePR(t, out, 3300, 3200)
 	if !regexp.MustCompile(`pra-pr-bar-add[^>]*flex-basis:\s*100`).MatchString(pr3300Section) {
 		t.Errorf("PR #3300 add segment should be 100%% of fill; section:\n%s", pr3300Section)
+	}
+}
+
+// TestRender_authorClass pins summary-row author-name coloring:
+//   - login ending in "[bot]" → yellow (pra-pr-author-bot).
+//   - association == CONTRIBUTOR (and not a bot) → green
+//     (pra-pr-author-contributor).
+//   - everything else → no modifier class; the base .pra-pr-author
+//     color applies (reviewer inspects the drill-down for detail).
+//
+// PR #3100 in the fixture (dependabot[bot] with CONTRIBUTOR
+// association) proves precedence: a bot that's also a long-running
+// CONTRIBUTOR still gets the bot color, not the contributor color.
+func TestRender_authorClass(t *testing.T) {
+	t.Parallel()
+
+	out, err := html.Render(fixtureEnvelope())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// PR #3100 is dependabot[bot] + CONTRIBUTOR — bot class must win.
+	pr3100 := isolatePR(t, out, 3100, 3200)
+	if !strings.Contains(pr3100, "pra-pr-author-bot") {
+		t.Errorf("PR #3100 (dependabot[bot]) should carry pra-pr-author-bot; section:\n%s", pr3100)
+	}
+	if strings.Contains(pr3100, "pra-pr-author-contributor") {
+		t.Errorf("PR #3100 is a bot — must not also carry pra-pr-author-contributor; section:\n%s", pr3100)
+	}
+
+	// PR #3200 is polyglot + CONTRIBUTOR — human contributor green.
+	pr3200 := isolatePR(t, out, 3200, 0)
+	if !strings.Contains(pr3200, "pra-pr-author-contributor") {
+		t.Errorf("PR #3200 (CONTRIBUTOR human) should carry pra-pr-author-contributor; section:\n%s", pr3200)
+	}
+
+	// PR #3500 is ellie + OWNER — no modifier class on the author link.
+	pr3500 := isolatePR(t, out, 3500, 3429)
+	if strings.Contains(pr3500, "pra-pr-author-bot") || strings.Contains(pr3500, "pra-pr-author-contributor") {
+		t.Errorf("PR #3500 (OWNER, human) should have no author modifier class; section:\n%s", pr3500)
 	}
 }
 

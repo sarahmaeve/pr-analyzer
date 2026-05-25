@@ -59,6 +59,7 @@ type analysisView struct {
 	AgentConfigTouched     bool
 	AssociationInteresting bool
 	AssociationPillClass   string
+	AuthorClass            string // modifier class on the summary-row author link; empty for "no special highlight"
 }
 
 // Render returns a complete HTML document for the given envelope.
@@ -108,6 +109,7 @@ func Render(env rjson.Envelope) (string, error) {
 			AgentConfigTouched:     len(a.CodeShape.AgentConfigPathsTouched) > 0,
 			AssociationInteresting: isInterestingAssociation(a.EngineerProfile.AuthorAssociation),
 			AssociationPillClass:   associationPillClass(a.EngineerProfile.AuthorAssociation),
+			AuthorClass:            authorClass(a.PR.Author, a.EngineerProfile.AuthorAssociation),
 		}
 	}
 
@@ -209,6 +211,32 @@ func isInterestingAssociation(s string) bool {
 //   - MANNEQUIN → danger (red): bot / proxy accounts, real abuse-report signal.
 //   - anything else (future GitHub enum) → warning (orange) so an unknown value
 //     surfaces with the conservative "worth a look" treatment.
+//
+// authorClass picks the summary-row author-link modifier class so a
+// reviewer scanning the report can identify bots and known repeat
+// contributors at a glance, without expanding the drill-down.
+//
+//   - "[bot]" suffix on the login → pra-pr-author-bot (yellow). Bot
+//     identity wins even when the bot has a CONTRIBUTOR association:
+//     a dependabot that's been around forever is still a bot, and the
+//     visual cue should communicate "automation" first.
+//   - CONTRIBUTOR association (human) → pra-pr-author-contributor
+//     (green). Positive signal — this person has landed code here
+//     before.
+//   - Anything else (OWNER, MEMBER, COLLABORATOR, NONE, FIRST_TIME_*,
+//     MANNEQUIN, etc.) → no modifier class. Reviewers consult the
+//     drill-down for those — saves the summary row's color budget
+//     for the two highest-frequency signals.
+func authorClass(author, association string) string {
+	if strings.HasSuffix(author, "[bot]") {
+		return "pra-pr-author-bot"
+	}
+	if association == "CONTRIBUTOR" {
+		return "pra-pr-author-contributor"
+	}
+	return ""
+}
+
 func associationPillClass(s string) string {
 	switch s {
 	case "CONTRIBUTOR":

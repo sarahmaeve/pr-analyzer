@@ -201,6 +201,26 @@ details[open] > summary .pra-pr-toggle::before { content: '[−]'; }
   border-bottom: 1px solid var(--pra-color-primary);
 }
 
+/* Identity-based author coloring — only the two highest-frequency
+ * signals are surfaced in the summary row to keep the color budget
+ * tight. Bots win over CONTRIBUTOR (a long-running bot is still a
+ * bot). Hover preserves the modifier color rather than reverting to
+ * the default ice-blue link hover, so the identity stays legible. */
+.pra-pr-author-bot {
+  color: var(--pra-color-warning);
+}
+.pra-pr-author-bot:hover {
+  color: var(--pra-color-warning);
+  border-bottom-color: var(--pra-color-warning);
+}
+.pra-pr-author-contributor {
+  color: var(--pra-color-success);
+}
+.pra-pr-author-contributor:hover {
+  color: var(--pra-color-success);
+  border-bottom-color: var(--pra-color-success);
+}
+
 /* Bar lane: fixed-width track. The lane is always 120px so columns
  * align across the report; the colored fill inside varies with the
  * PR's total LOC. */

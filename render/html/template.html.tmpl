@@ -42,7 +42,7 @@
           <summary>
             <span class="pra-pr-toggle" aria-hidden="true"></span>
             <span class="pra-pr-number">#{{.PR.Ref.Number}}</span>
-            <a class="pra-pr-author" href="https://github.com/{{.PR.Author}}" rel="noopener">{{.PR.Author}}</a>
+            <a class="pra-pr-author{{with .AuthorClass}} {{.}}{{end}}" href="https://github.com/{{.PR.Author}}" rel="noopener">{{.PR.Author}}</a>
             <span class="pra-pr-bar" role="img" aria-label="{{.PR.Additions}} additions, {{.PR.Deletions}} deletions">
               <span class="pra-pr-bar-fill" {{.BarFillStyle}}>
                 <span class="pra-pr-bar-add" {{.BarAddStyle}}></span>
