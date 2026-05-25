@@ -123,6 +123,39 @@ func (c *Client) fetchPRDetail(ctx context.Context, ref analyzer.PRRef) (analyze
 	}, nil
 }
 
+// ListOpenPRs returns the open PRs for owner/repo, walking the Link-
+// header pagination to completion. The listing endpoint omits
+// additions / deletions / changed_files / file lists; callers that
+// need those must follow up with FetchPR per ref. Only `number` is
+// load-bearing here — the other fields are decoded leniently for
+// debuggability but not surfaced.
+func (c *Client) ListOpenPRs(ctx context.Context, owner, repo string) ([]analyzer.PRRef, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100", c.baseURL, owner, repo)
+	var refs []analyzer.PRRef
+	for url != "" {
+		var page []prListItem
+		next, err := c.getJSON(ctx, url, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list open PRs for %s/%s: %w", owner, repo, err)
+		}
+		for _, item := range page {
+			refs = append(refs, analyzer.PRRef{Owner: owner, Repo: repo, Number: item.Number})
+		}
+		url = next
+	}
+	return refs, nil
+}
+
+// prListItem is the trimmed shape of one element in the
+// /repos/{o}/{r}/pulls response. The listing endpoint returns the
+// same outer shape as PR detail, but additions / deletions /
+// changed_files / files are absent — the connector intentionally
+// declines to model the rest of the response so that future readers
+// don't mistake the listing for a "PR detail + extras" call.
+type prListItem struct {
+	Number int `json:"number"`
+}
+
 func (c *Client) fetchAllFiles(ctx context.Context, ref analyzer.PRRef) ([]analyzer.PRFile, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files?per_page=100", c.baseURL, ref.Owner, ref.Repo, ref.Number)
 	var all []analyzer.PRFile

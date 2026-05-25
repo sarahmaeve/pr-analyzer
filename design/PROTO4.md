@@ -89,7 +89,7 @@ classification.
 ## Schema
 
 No YAML changes in slice 4. Engineer Profile gains its own block
-only when a future slice introduces per-project knobs.
+only when a future slice introduces engineer-profile knobs.
 
 ## Library API
 
@@ -139,9 +139,9 @@ in the trusted allowlist.
 ## Module impact
 
 - `engineerprofile/engineerprofile.go` — new leaf package.
-- `engineerprofile/config.go` — empty for slice 4; placeholder for
-  slice 5's per-project knobs. _Or_ skip this file entirely and add
-  it later. **Decision: skip; add when needed.**
+- `engineerprofile/config.go` — empty for slice 4; placeholder for a
+  later slice's engineer-profile knobs. _Or_ skip this file entirely
+  and add it later. **Decision: skip; add when needed.**
 - `analyzer/analyzer.go` — `PR` gains `AuthorAssociation string`.
 - `analyzer/analyze.go` — `Analysis` gains `EngineerProfile`; wire
   `engineerprofile.Collect` into `Analyze`.

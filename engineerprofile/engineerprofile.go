@@ -28,7 +28,7 @@ type Signals struct {
 	// string, preserved verbatim. The renderer applies its own
 	// interestingness filter at display time; collection never
 	// hides or rewrites the raw value.
-	AuthorAssociation string
+	AuthorAssociation string `json:"author_association"`
 }
 
 func Collect(in Input) Signals {

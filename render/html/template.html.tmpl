@@ -1,0 +1,118 @@
+{{- /* gotype: github.com/sarahmaeve/pr-analyzer/render/html.page */ -}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pr-analyzer — {{.Repo.Owner}}/{{.Repo.Repo}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Exo+2:wght@400;500&display=swap">
+  <style>{{.CSS}}</style>
+</head>
+<body>
+  <main class="pra-app">
+    <header class="pra-header"
+            data-pra-repo="{{.Repo.Owner}}/{{.Repo.Repo}}"
+            data-pra-count="{{.Count}}"
+            data-pra-generated="{{.GeneratedAtFormatted}}">
+      <h1 class="pra-title">
+        <a href="https://github.com/{{.Repo.Owner}}/{{.Repo.Repo}}" rel="noopener">{{.Repo.Owner}}/{{.Repo.Repo}}</a>
+      </h1>
+      <p class="pra-meta">
+        <a class="pra-count" href="https://github.com/{{.Repo.Owner}}/{{.Repo.Repo}}/pulls" rel="noopener">{{.Count}} OPEN PRS</a>
+        <span class="pra-stamp">{{.GeneratedAtFormatted}} · schema v{{.SchemaVersion}}</span>
+      </p>
+    </header>
+
+    <ol class="pra-prs">
+{{range .Views}}      <li class="pra-pr"
+          data-pra-pr-number="{{.PR.Ref.Number}}"
+          data-pra-pr-author="{{.PR.Author}}"
+          data-pra-pr-author-association="{{.PR.AuthorAssociation}}"
+          data-pra-pr-draft="{{.PR.Draft}}"
+          data-pra-pr-loc-additions="{{.PR.Additions}}"
+          data-pra-pr-loc-deletions="{{.PR.Deletions}}"
+          data-pra-pr-loc-total="{{.CodeShape.LOC.Total}}"
+          data-pra-pr-files-changed="{{.PR.ChangedFiles}}"
+          data-pra-pr-tests-touched="{{.CodeShape.TestsTouched}}"
+          data-pra-pr-agent-config-touched="{{.AgentConfigTouched}}"
+          data-pra-pr-exceeds-max-loc="{{.CodeShape.ExceedsMaxLOC}}">
+        <details>
+          <summary>
+            <span class="pra-pr-toggle" aria-hidden="true"></span>
+            <span class="pra-pr-number">#{{.PR.Ref.Number}}</span>
+            <a class="pra-pr-author" href="https://github.com/{{.PR.Author}}" rel="noopener">{{.PR.Author}}</a>
+            <span class="pra-pr-bar" role="img" aria-label="{{.PR.Additions}} additions, {{.PR.Deletions}} deletions">
+              <span class="pra-pr-bar-fill" {{.BarFillStyle}}>
+                <span class="pra-pr-bar-add" {{.BarAddStyle}}></span>
+                <span class="pra-pr-bar-del" {{.BarDelStyle}}></span>
+              </span>
+            </span>
+            <span class="pra-pr-files-bar" role="img" aria-label="{{.PR.ChangedFiles}} files changed">
+              <span class="pra-pr-files-bar-fill" {{.FilesBarFillStyle}}></span>
+            </span>
+            <a class="pra-pr-title" href="{{.PR.URL}}" rel="noopener">{{.PR.Title}}</a>
+          </summary>
+          <div class="pra-pr-body">
+            <dl class="pra-pr-signals">
+              <dt>LOC</dt>
+              <dd>adds: {{.PR.Additions}} · deletes: {{.PR.Deletions}} · files: {{.PR.ChangedFiles}}</dd>
+
+              <dt>Tests</dt>
+              <dd>{{if .CodeShape.TestsTouched -}}
+                <span class="pra-pill pra-pill-success">TOUCHED</span>
+              {{- else -}}
+                <span class="pra-pill pra-pill-warning">NOT TOUCHED</span>
+              {{- end}}</dd>
+
+              {{if .CodeShape.Languages -}}
+              <dt>Languages</dt>
+              <dd>{{join .CodeShape.Languages ", "}}</dd>
+              {{- end}}
+
+              {{if .CodeShape.ManifestsTouched -}}
+              <dt>Dependency manifests</dt>
+              <dd>{{join .CodeShape.ManifestsTouched ", "}}</dd>
+              {{- end}}
+
+              {{if .CodeShape.AgentConfigPathsTouched -}}
+              <dt><span class="pra-pill pra-pill-danger">AGENT-CONFIG</span></dt>
+              <dd>{{join .CodeShape.AgentConfigPathsTouched ", "}}</dd>
+              {{- end}}
+
+              {{if .CodeShape.RiskyPathsTouched -}}
+              <dt><span class="pra-pill pra-pill-warning">RISKY PATHS</span></dt>
+              <dd>{{join .CodeShape.RiskyPathsTouched ", "}}</dd>
+              {{- end}}
+
+              {{if .AssociationInteresting -}}
+              <dt>Author association</dt>
+              <dd><span class="pra-pill {{.AssociationPillClass}}">{{.EngineerProfile.AuthorAssociation}}</span></dd>
+              {{- end}}
+
+              {{if .CodeShape.ExceedsMaxLOC -}}
+              <dt><span class="pra-pill pra-pill-danger">EXCEEDS MAX LOC</span></dt>
+              <dd>{{.CodeShape.LOC.Total}} &gt; {{.CodeShape.MaxLOCThreshold}}</dd>
+              {{- end}}
+
+              {{with .CodeShape.LanguagesByPosture -}}
+                {{if .Anomalous -}}
+                <dt><span class="pra-pill pra-pill-warning">ANOMALOUS LANGUAGES</span></dt>
+                <dd>{{join .Anomalous ", "}}</dd>
+                {{- end}}
+                {{if .Preferred -}}
+                <dt><span class="pra-pill pra-pill-success">PREFERRED LANGUAGES</span></dt>
+                <dd>{{join .Preferred ", "}}</dd>
+                {{- end}}
+                {{if .Allowed -}}
+                <dt>Allowed languages</dt>
+                <dd>{{join .Allowed ", "}}</dd>
+                {{- end}}
+              {{- end}}
+            </dl>
+          </div>
+        </details>
+      </li>
+{{end}}    </ol>
+  </main>

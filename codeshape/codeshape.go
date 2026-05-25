@@ -22,46 +22,46 @@ type File struct {
 }
 
 type LOC struct {
-	Additions int
-	Deletions int
-	Total     int
+	Additions int `json:"additions"`
+	Deletions int `json:"deletions"`
+	Total     int `json:"total"`
 }
 
 type Signals struct {
-	LOC               LOC
-	TestsTouched      bool
-	ManifestsTouched  []string
-	Languages         []string
-	RiskyPathsTouched []string
+	LOC               LOC      `json:"loc"`
+	TestsTouched      bool     `json:"tests_touched"`
+	ManifestsTouched  []string `json:"manifests_touched"`
+	Languages         []string `json:"languages"`
+	RiskyPathsTouched []string `json:"risky_paths_touched"`
 	// AgentConfigPathsTouched lists PR file paths matching the
 	// AI-agent configuration catalog (.cursorrules, CLAUDE.md, .claude/,
 	// .cursor/, etc.). Built-in, not project-customized: the catalog
 	// names a cross-project threat class (prompt-injection vector via
 	// agent config files), not a per-project preference.
-	AgentConfigPathsTouched []string
+	AgentConfigPathsTouched []string `json:"agent_config_paths_touched"`
 	// ExceedsMaxLOC is true iff Config.MaxLOC was set (>0) and
 	// LOC.Total exceeds it (strict greater-than).
-	ExceedsMaxLOC bool
+	ExceedsMaxLOC bool `json:"exceeds_max_loc"`
 	// MaxLOCThreshold echoes Config.MaxLOC so the renderer can report it
 	// alongside the bullet. Zero when no opinion is configured.
-	MaxLOCThreshold int
+	MaxLOCThreshold int `json:"max_loc_threshold"`
 	// LanguagesByPosture buckets detected programming languages by the
 	// project's posture. Non-programming languages (Markdown, YAML, etc.)
 	// never appear here. Zero-value when no posture lists are configured.
-	LanguagesByPosture LanguagesByPosture
+	LanguagesByPosture LanguagesByPosture `json:"languages_by_posture"`
 }
 
 // LanguagesByPosture buckets detected languages by the project's
 // posture from Config.Languages.
 type LanguagesByPosture struct {
 	// Preferred contains languages present in Config.Languages.Preferred.
-	Preferred []string
+	Preferred []string `json:"preferred"`
 	// Allowed contains languages in Config.Languages.Allowed that are NOT
 	// also in Preferred.
-	Allowed []string
+	Allowed []string `json:"allowed"`
 	// Anomalous contains detected programming languages absent from both
 	// Preferred and Allowed.
-	Anomalous []string
+	Anomalous []string `json:"anomalous"`
 }
 
 func Collect(in Input) Signals {

@@ -24,8 +24,8 @@ No diff content, no engineer profile, no org rules — those land in later slice
 - Connectors beyond GitHub.
 - Renderers beyond CLI.
 - File-based configuration (YAML / TOML). Library accepts Go options; CLI accepts flags.
-- Risky-path detection. Deferred until per-project configuration lands; we deliberately do not introduce glob lists or regexes in this slice.
-- Language preferences / aberrations. Languages are surfaced as a neutral fact in this slice; "preferred" or "banned" judgements wait on per-project configuration.
+- Risky-path detection. Deferred until org configuration lands; we deliberately do not introduce glob lists or regexes in this slice.
+- Language preferences / aberrations. Languages are surfaced as a neutral fact in this slice; "preferred" or "banned" judgements wait on org configuration.
 
 ## Inputs
 
@@ -47,7 +47,7 @@ Each collector returns its own typed result struct. For this slice that is `code
 | `LOC` (adds, deletes, total) | PR `additions` / `deletions` | Direct read.                                                                                                                                                                         |
 | `TestsTouched` (bool)        | file list                    | Path matches: `_test.go`; basenames `test_*.py`, `*_test.py`, `*_test.rb`, `*_spec.rb`; basenames containing `.test.` or `.spec.`; or any path under `tests/`, `test/`, `spec/`.       |
 | `ManifestsTouched` (paths)   | file list                    | Any path is a known manifest: `go.mod`, `go.sum`, `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `requirements.txt`, `Pipfile.lock`, `Cargo.toml`, `Cargo.lock`, `Gemfile`, `Gemfile.lock`. |
-| `Languages` (names)          | file list                    | Map each file's extension or basename to a language name; deduplicate and sort. Initial seed: Go, JavaScript, TypeScript, Python, Rust, Ruby, Java, Kotlin, Swift, C, C++, C#, Shell, Markdown, YAML, JSON, HTML, CSS, Dockerfile, Makefile. Surfaced as a neutral fact — no preference / aberration judgement until per-project config lands. |
+| `Languages` (names)          | file list                    | Map each file's extension or basename to a language name; deduplicate and sort. Initial seed: Go, JavaScript, TypeScript, Python, Rust, Ruby, Java, Kotlin, Swift, C, C++, C#, Shell, Markdown, YAML, JSON, HTML, CSS, Dockerfile, Makefile. Surfaced as a neutral fact — no preference / aberration judgement until org config lands. |
 
 There is no separate `Shape` classification (`MostlyAdditions` / `MostlyDeletions` / `Mixed`): the bar already visualizes the adds-vs-deletes ratio, and any threshold would be arbitrary. Embedders that want a categorical label can derive it from `LOC.Additions` and `LOC.Deletions`.
 
@@ -155,7 +155,7 @@ func Collect(in Input) Signals
 
 `codeshape` deliberately defines its own `Input` and `File` types rather than importing `analyzer.PR` / `analyzer.PRFile`. This breaks the import cycle (`analyzer.Analysis` already references `codeshape.Signals`) and keeps `codeshape` usable standalone — an embedder feeding a non-GitHub source can construct an `Input` directly. The orchestrator translates `PR → codeshape.Input` before calling `Collect`.
 
-No configuration options exist on `Analyze` in this slice — none are needed yet. When the first option arrives (e.g. for risky-path globs once per-project config lands), the signature gains `opts ...Option`, which is non-breaking for callers passing no options.
+No configuration options exist on `Analyze` in this slice — none are needed yet. When the first option arrives (e.g. for risky-path globs once org config lands), the signature gains `opts ...Option`, which is non-breaking for callers passing no options.
 
 ## Bar rendering
 

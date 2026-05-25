@@ -2,15 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
+	stdjson "encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alecthomas/kong"
 
@@ -118,8 +124,8 @@ func TestKongParse_LocalCloneDir_AcceptsExistingDir(t *testing.T) {
 	if args.LocalCloneDir != tempDir {
 		t.Errorf("LocalCloneDir = %q, want %q", args.LocalCloneDir, tempDir)
 	}
-	if args.PR != "o/r#1" {
-		t.Errorf("PR = %q, want %q", args.PR, "o/r#1")
+	if args.Scan.PR != "o/r#1" {
+		t.Errorf("Scan.PR = %q, want %q", args.Scan.PR, "o/r#1")
 	}
 }
 
@@ -138,6 +144,78 @@ func TestKongParse_LocalCloneDir_RejectsMissingDir(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "does-not-exist") {
 		t.Errorf("error %v does not mention the bad path", err)
+	}
+}
+
+// TestParseTarget pins the dispatch surface: bare `owner/repo` is
+// list mode (Number == 0), `owner/repo#N` and full PR URLs are
+// single-PR mode (Number > 0). The function reuses the underlying
+// parsePRRef path for single-PR forms — covered separately — so this
+// test focuses on the discrimination plus the new bare-repo path.
+func TestParseTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in       string
+		want     target
+		wantList bool
+	}{
+		// Bare repo — list mode.
+		{"Kong/kong", target{Owner: "Kong", Repo: "kong", Number: 0}, true},
+		{"sarahmaeve/signatory", target{Owner: "sarahmaeve", Repo: "signatory", Number: 0}, true},
+		{"  Kong/kong  ", target{Owner: "Kong", Repo: "kong", Number: 0}, true},
+		// owner/repo#N — single-PR mode.
+		{"Kong/kong#14838", target{Owner: "Kong", Repo: "kong", Number: 14838}, false},
+		// PR URL — single-PR mode.
+		{"https://github.com/Kong/kong/pull/14838", target{Owner: "Kong", Repo: "kong", Number: 14838}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseTarget(tc.in)
+			if err != nil {
+				t.Fatalf("parseTarget(%q) error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("parseTarget(%q) = %+v, want %+v", tc.in, got, tc.want)
+			}
+			if got.IsList() != tc.wantList {
+				t.Errorf("parseTarget(%q).IsList() = %v, want %v", tc.in, got.IsList(), tc.wantList)
+			}
+		})
+	}
+}
+
+func TestParseTarget_Errors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in              string
+		wantErrContains string
+	}{
+		// Empty / unrecognized structure.
+		{"", "usage:"},
+		{"no-slash-at-all", "usage:"},
+		// Bare repo URL: not supported in slice 5; users must use owner/repo or owner/repo#N.
+		{"https://github.com/Kong/kong", "bare repo URL"},
+		// Bad character in owner / repo for bare form.
+		{"a b/c", "invalid owner"},
+		{"o/r;evil", "invalid repo"},
+		{"o/../r", "invalid repo"},
+		// Trailing slash that would otherwise look like extra-segment repo.
+		{"o/r/extra", "invalid repo"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseTarget(tc.in)
+			if err == nil {
+				t.Fatalf("parseTarget(%q) returned nil, want error containing %q", tc.in, tc.wantErrContains)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) {
+				t.Errorf("parseTarget(%q) error = %v, want substring %q", tc.in, err, tc.wantErrContains)
+			}
+		})
 	}
 }
 
@@ -254,7 +332,7 @@ func TestRun_RejectsHostileBaseURL(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "any-token")
 	t.Setenv("GITHUB_API_BASE_URL", "https://attacker.example.com")
 
-	err := run(cliArgs{PR: "o/r#1"}, io.Discard, io.Discard)
+	err := runScan(cliArgs{Scan: scanCmd{PR: "o/r#1"}}, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error for hostile GITHUB_API_BASE_URL, got nil")
 	}
@@ -299,6 +377,107 @@ func TestAuthTransport_DoesNotMutateRequest(t *testing.T) {
 	}
 	if got := req.Header.Get("Authorization"); got != "" {
 		t.Errorf("authTransport mutated caller's request; Authorization=%q, want empty", got)
+	}
+}
+
+// TestRateLimitTransport_nextDelay_inRange pins the bounds: every
+// produced delay lies in [min, max]. Tested with a non-default narrow
+// range so a regression that, say, divides instead of adds would land
+// outside [3, 7] visibly. Run enough iterations that a flaky off-by-
+// one on the upper bound surfaces.
+func TestRateLimitTransport_nextDelay_inRange(t *testing.T) {
+	t.Parallel()
+
+	rt := newRateLimitTransport(nil, 3*time.Millisecond, 7*time.Millisecond)
+	for i := range 2000 {
+		d := rt.nextDelay()
+		if d < 3*time.Millisecond || d > 7*time.Millisecond {
+			t.Fatalf("iteration %d: nextDelay() = %v, want in [3ms, 7ms]", i, d)
+		}
+	}
+}
+
+// TestRateLimitTransport_nextDelay_varies proves the delay is actually
+// random — without this, a constant return of min would pass the
+// "in-range" test silently. The chance of all 100 draws landing on the
+// same of five possible millisecond buckets is (1/5)^99 ≈ 0, so a
+// single distinct second value is enough evidence.
+func TestRateLimitTransport_nextDelay_varies(t *testing.T) {
+	t.Parallel()
+
+	rt := newRateLimitTransport(nil, 3*time.Millisecond, 7*time.Millisecond)
+	first := rt.nextDelay()
+	for range 100 {
+		if rt.nextDelay() != first {
+			return
+		}
+	}
+	t.Fatalf("nextDelay() returned %v on 101 consecutive calls — random source not engaged", first)
+}
+
+// TestRateLimitTransport_RoundTrip_appliesDelay proves the transport
+// actually waits before the inner request goes out. Use a very short
+// fixed bound (3ms == 3ms) so the test is deterministic-ish; assert
+// elapsed >= bound minus a small slack for select-receive jitter.
+func TestRateLimitTransport_RoundTrip_appliesDelay(t *testing.T) {
+	t.Parallel()
+
+	var sawRequest atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		sawRequest.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	rt := newRateLimitTransport(http.DefaultTransport, 50*time.Millisecond, 50*time.Millisecond)
+	client := &http.Client{Transport: rt}
+
+	start := time.Now()
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	resp.Body.Close()
+	elapsed := time.Since(start)
+
+	if !sawRequest.Load() {
+		t.Fatal("inner transport was not called")
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("elapsed = %v, want >= 50ms (delay not applied)", elapsed)
+	}
+}
+
+// TestRateLimitTransport_RoundTrip_honorsContext proves an already-
+// cancelled context aborts the sleep instead of waiting the full
+// delay. Without this guard a user's Ctrl-C arrives only after the
+// next sleep finishes — for 300-500ms that's tolerable, but the
+// contract is "respect context", so pin it.
+func TestRateLimitTransport_RoundTrip_honorsContext(t *testing.T) {
+	t.Parallel()
+
+	rt := newRateLimitTransport(http.DefaultTransport, 10*time.Second, 10*time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unused.invalid", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	start := time.Now()
+	_, err = rt.RoundTrip(req)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("RoundTrip returned nil error for cancelled ctx")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v does not wrap context.Canceled", err)
+	}
+	if elapsed >= time.Second {
+		t.Errorf("elapsed = %v; cancellation did not abort the 10s sleep", elapsed)
 	}
 }
 
@@ -513,6 +692,319 @@ func TestSmoke_TrapdoorFixture(t *testing.T) {
 
 	if stderr.Len() != 0 {
 		t.Errorf("expected empty stderr on success, got:\n%s", stderr.String())
+	}
+}
+
+// signatoryRepoListServer stands up an httptest server that serves
+// the slice-5 list-mode fixture set: a /pulls?state=open response
+// listing three open PRs (#144, #142, #141) and the per-PR detail +
+// files endpoints for each. Used by TestSmoke_RepoList.
+func signatoryRepoListServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/sarahmaeve/signatory/pulls", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "../../connectors/github/testdata/signatory_pulls_open.json")
+	})
+	// Per-PR routes. ServeMux dispatches /pulls/144 before /pulls because the
+	// longer pattern is more specific.
+	for _, n := range []int{144, 142, 141} {
+		detailPath := fmt.Sprintf("/repos/sarahmaeve/signatory/pulls/%d", n)
+		filesPath := detailPath + "/files"
+		detailFixture := fmt.Sprintf("../../connectors/github/testdata/pr_%d.json", n)
+		filesFixture := fmt.Sprintf("../../connectors/github/testdata/pr_%d_files.json", n)
+		mux.HandleFunc(detailPath, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			http.ServeFile(w, r, detailFixture)
+		})
+		mux.HandleFunc(filesPath, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			http.ServeFile(w, r, filesFixture)
+		})
+	}
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestSmoke_RepoList exercises slice-5 list mode end-to-end: bare
+// repo arg → list endpoint → per-PR fetch loop → looped CLI text on
+// stdout + analyses.json in --out dir. Three PRs land in the output,
+// each as a distinct rendered block; the test asserts substrings
+// unique to each PR so a regression that drops a PR or re-renders
+// the same one three times fails loud.
+//
+// Slow by design: the rate-limit transport (300-500ms per request)
+// applies in list mode — 7 calls = ~2-3s wall clock. Smoke tests run
+// in parallel so this overlaps with the others.
+func TestSmoke_RepoList(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+	srv := signatoryRepoListServer(t)
+	outDir := t.TempDir()
+
+	cmd := exec.Command(bin, "--out", outDir, "sarahmaeve/signatory")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"GITHUB_TOKEN=smoke-test-token",
+		"GITHUB_API_BASE_URL=" + srv.URL,
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("binary failed: %v\nstderr:\n%s\nstdout:\n%s", err, stderr.String(), stdout.String())
+	}
+
+	out := stdout.String()
+	// One assertion per PR, anchored on a substring unique to that PR.
+	// PR #144 carries the OWNER association (no author-association
+	// bullet), 5631 adds; PR #142 is a small modification (author OWNER);
+	// PR #141 is FIRST_TIME_CONTRIBUTOR (bullet visible).
+	wants := []string{
+		"PR #144 sarahmaeve https://github.com/sarahmaeve/signatory/pull/144\n",
+		"adds: 5631  deletes: 220  files: 27\n",
+		"PR #142 sarahmaeve https://github.com/sarahmaeve/signatory/pull/142\n",
+		"adds: 24  deletes: 3  files: 1\n",
+		"PR #141 drive-by-contributor https://github.com/sarahmaeve/signatory/pull/141\n",
+		"adds: 2  deletes: 2  files: 1\n",
+		"author association: FIRST_TIME_CONTRIBUTOR\n",
+	}
+	for _, want := range wants {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+
+	// Progress lines appear on stderr; user piping stdout to a file
+	// must still see something. One [N/M] line per PR.
+	errStr := stderr.String()
+	for _, want := range []string{"[1/3]", "[2/3]", "[3/3]"} {
+		if !strings.Contains(errStr, want) {
+			t.Errorf("stderr missing progress marker %q:\n%s", want, errStr)
+		}
+	}
+
+	// analyses.json must exist in --out dir and decode to a valid
+	// Envelope with all three PRs.
+	jsonPath := filepath.Join(outDir, "analyses.json")
+	body, err := os.ReadFile(jsonPath) //nolint:gosec // G304: test-controlled path
+	if err != nil {
+		t.Fatalf("read %s: %v", jsonPath, err)
+	}
+	var env struct {
+		SchemaVersion int            `json:"schema_version"`
+		Repo          analyzer.PRRef `json:"repo"`
+		Analyses      []struct {
+			PR struct {
+				Ref analyzer.PRRef `json:"ref"`
+			} `json:"pr"`
+		} `json:"analyses"`
+	}
+	if err := stdjson.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, body)
+	}
+	if env.SchemaVersion != 1 {
+		t.Errorf("schema_version = %d, want 1", env.SchemaVersion)
+	}
+	if env.Repo.Owner != "sarahmaeve" || env.Repo.Repo != "signatory" {
+		t.Errorf("repo = %+v, want sarahmaeve/signatory", env.Repo)
+	}
+	if len(env.Analyses) != 3 {
+		t.Fatalf("len(analyses) = %d, want 3", len(env.Analyses))
+	}
+	gotNumbers := []int{env.Analyses[0].PR.Ref.Number, env.Analyses[1].PR.Ref.Number, env.Analyses[2].PR.Ref.Number}
+	wantNumbers := []int{144, 142, 141}
+	if !slices.Equal(gotNumbers, wantNumbers) {
+		t.Errorf("analyses PR numbers = %v, want %v (preserves ListOpenPRs order)", gotNumbers, wantNumbers)
+	}
+
+	// index.html must exist alongside analyses.json and contain the
+	// load-bearing markup tokens. Stable-contract details are tested
+	// in render/html/html_test.go; here we only verify the wiring.
+	htmlPath := filepath.Join(outDir, "index.html")
+	htmlBody, err := os.ReadFile(htmlPath) //nolint:gosec // G304: test-controlled path
+	if err != nil {
+		t.Fatalf("read %s: %v", htmlPath, err)
+	}
+	htmlStr := string(htmlBody)
+	htmlWants := []string{
+		"<!doctype html>",
+		`class="pra-pr"`,
+		`href="https://github.com/sarahmaeve/signatory"`,
+		`data-pra-pr-number="144"`,
+		`data-pra-pr-number="141"`,
+		// PR #141 in the fixture is FIRST_TIME_CONTRIBUTOR — orange pill.
+		"FIRST_TIME_CONTRIBUTOR",
+		"pra-pill-warning",
+		// Inline data block is present.
+		`<script type="application/json" id="pra-data">`,
+	}
+	for _, w := range htmlWants {
+		if !strings.Contains(htmlStr, w) {
+			t.Errorf("missing %q in index.html", w)
+		}
+	}
+}
+
+// TestSmoke_RenderHTML proves the render-html subcommand consumes
+// an existing analyses.json and writes HTML to stdout. Drives the
+// iteration loop where the user re-runs the renderer against a
+// cached scan without re-fetching from GitHub.
+func TestSmoke_RenderHTML(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+
+	jsonBody := `{
+  "schema_version": 1,
+  "generated_at": "2026-05-25T10:00:00Z",
+  "repo": {"owner": "atuinsh", "repo": "atuin", "number": 0},
+  "analyses": [
+    {
+      "pr": {
+        "ref": {"owner": "atuinsh", "repo": "atuin", "number": 42},
+        "title": "Render-html smoke fixture",
+        "author": "ellie",
+        "url": "https://github.com/atuinsh/atuin/pull/42",
+        "additions": 10,
+        "deletions": 2,
+        "changed_files": 3,
+        "author_association": "MEMBER"
+      },
+      "code_shape": {
+        "loc": {"additions": 10, "deletions": 2, "total": 12},
+        "tests_touched": true,
+        "languages": ["Rust"]
+      },
+      "engineer_profile": {"author_association": "MEMBER"}
+    }
+  ]
+}`
+	jsonPath := filepath.Join(t.TempDir(), "analyses.json")
+	if err := os.WriteFile(jsonPath, []byte(jsonBody), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	cmd := exec.Command(bin, "render-html", jsonPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("render-html failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	out := stdout.String()
+	wants := []string{
+		"<!doctype html>",
+		"atuinsh/atuin",
+		`href="https://github.com/atuinsh/atuin/pull/42"`,
+		`href="https://github.com/ellie"`,
+		"Render-html smoke fixture",
+		`<script type="application/json" id="pra-data">`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in render-html output", w)
+		}
+	}
+}
+
+// TestSmoke_Inspect runs the binary end-to-end via the inspect
+// subcommand: scan three fixture PRs to disk, then re-invoke
+// `pr-analyzer inspect <analyses.json>` and assert the summary
+// renders the load-bearing rows. Two-stage so the inspect path
+// exercises the same JSON file a user would consume.
+func TestSmoke_Inspect(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+	srv := signatoryRepoListServer(t)
+	outDir := t.TempDir()
+
+	// Stage 1: produce the analyses.json artifact.
+	scan := exec.Command(bin, "--out", outDir, "sarahmaeve/signatory")
+	scan.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"GITHUB_TOKEN=smoke-test-token",
+		"GITHUB_API_BASE_URL=" + srv.URL,
+	}
+	if out, err := scan.CombinedOutput(); err != nil {
+		t.Fatalf("scan stage failed: %v\n%s", err, out)
+	}
+
+	// Stage 2: inspect the produced artifact.
+	inspect := exec.Command(bin, "inspect", filepath.Join(outDir, "analyses.json"))
+	var stdout, stderr bytes.Buffer
+	inspect.Stdout = &stdout
+	inspect.Stderr = &stderr
+	if err := inspect.Run(); err != nil {
+		t.Fatalf("inspect stage failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	out := stdout.String()
+	wants := []string{
+		// Header: repo, count, schema version.
+		"sarahmaeve/signatory",
+		"3 open PRs",
+		"schema v1",
+		// Section headers — proves every writeX function ran.
+		"Author association",
+		"Languages",
+		"Lines of code",
+		"Tests touched",
+		"Agent-config files touched",
+		// Specific row content from the fixture data:
+		"FIRST_TIME_CONTRIBUTOR", // PR #141's author bucket
+		"Go",                     // detected language (PR #144, #142)
+		"5851",                   // PR #144's LOC total (5631+220)
+	}
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in inspect output:\n%s", w, out)
+		}
+	}
+}
+
+// TestSmoke_RepoList_RequiresGitHubToken proves the list-mode token
+// gate fires before any network activity. With no GITHUB_TOKEN in the
+// child's env, the binary must exit non-zero with stderr naming the
+// env var — and the fixture server must observe zero hits, since
+// hitting GitHub anonymously for 80+ PRs would burn the public-IP
+// rate limit instantly.
+func TestSmoke_RepoList_RequiresGitHubToken(t *testing.T) {
+	t.Parallel()
+
+	bin := buildBinary(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	cmd := exec.Command(bin, "sarahmaeve/signatory")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"GITHUB_API_BASE_URL=" + srv.URL,
+		// Deliberately omit GITHUB_TOKEN.
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("binary succeeded without GITHUB_TOKEN; want non-zero exit")
+	}
+	if !strings.Contains(stderr.String(), "GITHUB_TOKEN") {
+		t.Errorf("stderr does not mention GITHUB_TOKEN: %s", stderr.String())
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("fixture server observed %d hits; want 0 (token check must fire before any network)", n)
 	}
 }
 

@@ -40,7 +40,7 @@ codeshape: { ... }
 
 ```go
 type cliArgs struct {
-    Config        string `short:"c" type:"existingfile" help:"Path to project config file."`
+    Config        string `short:"c" type:"existingfile" help:"Path to org config file."`
     LocalCloneDir string `name:"local-clone-dir" type:"existingdir" help:"Local checkout of the PR's repository. Defaults to CWD when neither --local-clone-dir nor local_clone_dir is set."`
     PR            string `arg:"" name:"pr-ref" help:"PR ref: owner/repo#number or full GitHub PR URL."`
 }

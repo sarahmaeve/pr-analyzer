@@ -19,6 +19,14 @@ func (f fakeSource) FetchPR(_ context.Context, _ analyzer.PRRef) (analyzer.PR, e
 	return f.pr, f.err
 }
 
+// ListOpenPRs satisfies the slice-5 PRSource interface extension.
+// Existing single-PR tests never invoke listing, so a permissive
+// zero-value response keeps the wiring honest without coupling these
+// tests to list-mode behavior.
+func (f fakeSource) ListOpenPRs(_ context.Context, _, _ string) ([]analyzer.PRRef, error) {
+	return nil, nil
+}
+
 // TestAnalyze_translatesPRtoInputAndPopulatesCodeShape exercises every
 // codeshape signal that the orchestrator is responsible for flowing
 // through. A regression in the PR→codeshape.Input translation (e.g.

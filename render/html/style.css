@@ -1,0 +1,333 @@
+/*
+ * pr-analyzer HTML report stylesheet — cinematic sci-fi screen graphics.
+ *
+ * Skinning contract: every selector below uses the pra- / .pra-pr-*
+ * class namespace and reads from CSS custom properties on :root.
+ * User overrides should replace variables, not selectors.
+ */
+
+:root {
+  --pra-color-primary:    #7FD6FF;
+  --pra-color-secondary:  #FFB45C;
+  --pra-color-accent:     #FF5E66;
+  --pra-color-background: #08111B;
+  --pra-color-surface:    #101C29;
+  --pra-color-text:       #E7F4FF;
+  --pra-color-muted:      #7C97AC;
+  --pra-color-border:     #31506B;
+  --pra-color-success:    #61F0BF;
+  --pra-color-warning:    #FFB45C;
+  --pra-color-error:      #FF5E66;
+  --pra-color-info:       #7FD6FF;
+
+  --pra-space-xs:  4px;
+  --pra-space-sm:  8px;
+  --pra-space-md:  12px;
+  --pra-space-lg:  16px;
+  --pra-space-xl:  24px;
+  --pra-space-2xl: 32px;
+  --pra-space-3xl: 48px;
+
+  --pra-font-headline: 'Orbitron', ui-sans-serif, system-ui, sans-serif;
+  --pra-font-body:     'Exo 2', ui-sans-serif, system-ui, sans-serif;
+  --pra-font-mono:     'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--pra-color-background);
+  color: var(--pra-color-text);
+  font-family: var(--pra-font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  /* Subtle radar-grid background. */
+  background-image:
+    linear-gradient(rgba(127, 214, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(127, 214, 255, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-attachment: fixed;
+}
+
+a {
+  color: var(--pra-color-primary);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(127, 214, 255, 0.25);
+  transition: border-color 120ms, color 120ms, text-shadow 120ms;
+}
+a:hover {
+  border-bottom-color: var(--pra-color-primary);
+  text-shadow: 0 0 8px rgba(127, 214, 255, 0.5);
+}
+
+.pra-app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--pra-space-2xl) var(--pra-space-xl);
+}
+
+/* ===== Header ===== */
+.pra-header {
+  margin-bottom: var(--pra-space-2xl);
+  padding: var(--pra-space-lg) 0;
+  border-bottom: 1px solid var(--pra-color-border);
+  position: relative;
+}
+/* Bright top-left corner trace — diegetic instrument frame. */
+.pra-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 28px;
+  height: 28px;
+  border-top: 2px solid var(--pra-color-primary);
+  border-left: 2px solid var(--pra-color-primary);
+  box-shadow: -1px -1px 12px rgba(127, 214, 255, 0.35);
+  pointer-events: none;
+}
+
+.pra-title {
+  font-family: var(--pra-font-headline);
+  font-size: 1.953rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+.pra-title a {
+  color: var(--pra-color-text);
+  border-bottom: none;
+}
+.pra-title a:hover {
+  color: var(--pra-color-primary);
+}
+
+.pra-meta {
+  margin: var(--pra-space-sm) 0 0;
+  font-family: var(--pra-font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pra-color-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pra-space-lg);
+}
+.pra-count {
+  color: var(--pra-color-primary);
+  border-bottom: none;
+}
+a.pra-count:hover {
+  text-shadow: 0 0 8px rgba(127, 214, 255, 0.5);
+  border-bottom: 1px solid var(--pra-color-primary);
+}
+
+/* ===== PR list ===== */
+.pra-prs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pra-space-md);
+}
+
+.pra-pr {
+  background-color: var(--pra-color-surface);
+  border: 1px solid var(--pra-color-border);
+  /* Chamfered top-right corner: 14px notch. The clip-path also clips
+   * the border at the bevel, which is what makes the silhouette read
+   * as engineered hardware rather than a soft rectangle. */
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    0 100%
+  );
+  transition: border-color 120ms;
+}
+.pra-pr:hover { border-color: rgba(127, 214, 255, 0.45); }
+
+/* ===== Summary row ===== */
+.pra-pr summary {
+  cursor: pointer;
+  padding: var(--pra-space-md) var(--pra-space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--pra-space-md);
+  list-style: none;
+  user-select: none;
+}
+.pra-pr summary::-webkit-details-marker { display: none; }
+.pra-pr summary::marker { display: none; }
+
+.pra-pr-toggle {
+  display: inline-block;
+  width: 22px;
+  flex-shrink: 0;
+  font-family: var(--pra-font-mono);
+  font-size: 0.875rem;
+  color: var(--pra-color-primary);
+  user-select: none;
+}
+.pra-pr-toggle::before { content: '[+]'; }
+.pra-pr details[open] > summary .pra-pr-toggle::before,
+details[open] > summary .pra-pr-toggle::before { content: '[−]'; }
+
+.pra-pr-number {
+  font-family: var(--pra-font-headline);
+  font-weight: 600;
+  color: var(--pra-color-primary);
+  flex-shrink: 0;
+  min-width: 5em;
+  letter-spacing: 0.02em;
+}
+
+.pra-pr-author {
+  font-family: var(--pra-font-mono);
+  font-size: 0.875rem;
+  color: var(--pra-color-text);
+  border-bottom: none;
+  flex-shrink: 0;
+  min-width: 9em;
+}
+.pra-pr-author:hover {
+  color: var(--pra-color-primary);
+  border-bottom: 1px solid var(--pra-color-primary);
+}
+
+/* Bar lane: fixed-width track. The lane is always 120px so columns
+ * align across the report; the colored fill inside varies with the
+ * PR's total LOC. */
+.pra-pr-bar {
+  display: inline-flex;
+  width: 120px;
+  height: 4px;
+  background-color: rgba(49, 80, 107, 0.5);
+  border-radius: 1px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+/* Fill: width set inline, log-scaled against the report's max total
+ * so a 5000-LOC PR fills the lane while a 50-LOC PR shows as a short
+ * stub. Two flex children inside split the fill by adds-vs-deletes
+ * ratio. */
+.pra-pr-bar-fill {
+  display: flex;
+  height: 100%;
+}
+.pra-pr-bar-add {
+  background-color: var(--pra-color-primary);
+  box-shadow: 0 0 6px rgba(127, 214, 255, 0.5);
+}
+.pra-pr-bar-del {
+  background-color: var(--pra-color-success);
+  box-shadow: 0 0 6px rgba(97, 240, 191, 0.5);
+}
+
+/* Files-changed bar — second amplitude indicator next to the LOC
+ * bar. Single-segment so the eye reads it as a secondary metric;
+ * muted slate color keeps it visually subordinate to the primary
+ * LOC bar's blue/green. */
+.pra-pr-files-bar {
+  display: inline-flex;
+  width: 80px;
+  height: 4px;
+  background-color: rgba(49, 80, 107, 0.5);
+  border-radius: 1px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.pra-pr-files-bar-fill {
+  height: 100%;
+  background-color: var(--pra-color-muted);
+  box-shadow: 0 0 4px rgba(124, 151, 172, 0.4);
+}
+
+.pra-pr-title {
+  flex: 1;
+  color: var(--pra-color-text);
+  font-family: var(--pra-font-body);
+  border-bottom: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pra-pr-title:hover { color: var(--pra-color-primary); }
+
+/* ===== Drill-down body ===== */
+.pra-pr-body {
+  padding: var(--pra-space-md) var(--pra-space-lg) var(--pra-space-lg);
+  border-top: 1px solid var(--pra-color-border);
+  margin: 0 var(--pra-space-lg);
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.pra-pr-signals {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 14em 1fr;
+  gap: var(--pra-space-sm) var(--pra-space-lg);
+  align-items: baseline;
+}
+.pra-pr-signals dt {
+  font-family: var(--pra-font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pra-color-muted);
+  margin: 0;
+}
+.pra-pr-signals dd {
+  margin: 0;
+  font-family: var(--pra-font-mono);
+  font-size: 0.875rem;
+  color: var(--pra-color-text);
+  word-break: break-word;
+}
+
+/* ===== Status pills ===== */
+.pra-pill {
+  display: inline-block;
+  padding: 2px var(--pra-space-sm);
+  font-family: var(--pra-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-left-width: 3px;
+  background-color: transparent;
+}
+.pra-pill-danger {
+  color: var(--pra-color-error);
+  background-color: rgba(255, 94, 102, 0.08);
+}
+.pra-pill-warning {
+  color: var(--pra-color-warning);
+  background-color: rgba(255, 180, 92, 0.08);
+}
+.pra-pill-success {
+  color: var(--pra-color-success);
+  background-color: rgba(97, 240, 191, 0.08);
+}
+.pra-pill-info {
+  color: var(--pra-color-info);
+  background-color: rgba(127, 214, 255, 0.08);
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .pra-app { padding: var(--pra-space-xl) var(--pra-space-md); }
+  .pra-pr summary { flex-wrap: wrap; }
+  .pra-pr-title { flex-basis: 100%; }
+  .pra-pr-signals { grid-template-columns: 1fr; gap: var(--pra-space-xs); }
+  .pra-pr-signals dt { margin-top: var(--pra-space-sm); }
+}

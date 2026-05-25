@@ -1,10 +1,10 @@
-# Second-Slice Prototype: per-project configuration
+# Second-Slice Prototype: org configuration
 
 ## Goal
 
-Give projects a YAML file (`pr-analyzer.yaml`) that drives the existing Code Shape collector's behavior — and produces new signals — without changing pr-analyzer's "emit, don't enforce" posture. The loader treats user files as **inputs**, not as **contract**: anything unrecognized is reported and skipped, anything recognized is applied, the rest of the run continues normally. Code is the contract; YAML is one of many ways the user might describe their intent.
+Give orgs a YAML file (`pr-analyzer.yaml`) that drives the existing Code Shape collector's behavior — and produces new signals — without changing pr-analyzer's "emit, don't enforce" posture. "Org" is the unified term for whatever entity publishes the config — an OSS project, a corporation, a team within a corporation; the file shape is the same for all of them. The loader treats user files as **inputs**, not as **contract**: anything unrecognized is reported and skipped, anything recognized is applied, the rest of the run continues normally. Code is the contract; YAML is one of many ways the user might describe their intent.
 
-Slice 1 (`PROTO.md`) shipped the end-to-end pipeline with hard-coded heuristics. Slice 2 turns four of those knobs over to the project: bar scale, risky paths, max LOC, and language posture.
+Slice 1 (`PROTO.md`) shipped the end-to-end pipeline with hard-coded heuristics. Slice 2 turns four of those knobs over to the org: bar scale, risky paths, max LOC, and language posture.
 
 ## In scope
 
@@ -23,7 +23,7 @@ Slice 1 (`PROTO.md`) shipped the end-to-end pipeline with hard-coded heuristics.
 - Repo-fetched config (pulling `pr-analyzer.yaml` from the PR's *own* repo via the GitHub API). For now the config is **the runner's**, not the PR's repo's.
 - Glob support beyond simple path-segment prefixes. We can roll our own `**` matcher later if a use case demands it; not in this slice.
 - Schema versioning. `version:` field absent by design.
-- User-customizable dependency-manifest seed. Adding a manifest pattern is a pr-analyzer maintainer concern (a PR to the built-in seed), not a user-config concern: all new dependencies should be made visible regardless of project preference.
+- User-customizable dependency-manifest seed. Adding a manifest pattern is a pr-analyzer maintainer concern (a PR to the built-in seed), not a user-config concern: all new dependencies should be made visible regardless of org preference.
 - Custom test-file heuristics (beyond the slice-1 seed). Worth doing once the loader exists, but separate slice.
 - Hidden / dotfile config form (`.pr-analyzer.yaml`). Single visible filename only.
 - Per-collector enable / disable toggles.
@@ -38,7 +38,7 @@ A single YAML file at one of:
 
 ## Schema
 
-All keys optional. Defaults match slice 1 — a project with no opinions sees the same output as slice 1.
+All keys optional. Defaults match slice 1 — an org with no opinions sees the same output as slice 1.
 
 ```yaml
 # Renderer / output interface concerns.
@@ -71,7 +71,7 @@ codeshape:
     allowed:   [Go, TypeScript]
 ```
 
-Notably absent: no `banned:` list. Anomalies are *inferred* from "what the project listed as preferred or allowed", which is a softer framing than "this language is forbidden" and avoids re-litigating the "we emit, we don't enforce" stance.
+Notably absent: no `banned:` list. Anomalies are *inferred* from "what the org listed as preferred or allowed", which is a softer framing than "this language is forbidden" and avoids re-litigating the "we emit, we don't enforce" stance.
 
 ## Language classification
 
@@ -85,9 +85,9 @@ Anomaly detection runs only over **programming languages**. Slice-1 already dete
 
 > Markdown, YAML, JSON, HTML, CSS, Dockerfile, Makefile.
 
-The latter group is data / markup / build-config. A Go-only project with one Markdown file in a PR should not see a "Markdown is anomalous" bullet. Most CI files are YAML and are exempted naturally by this rule.
+The latter group is data / markup / build-config. A Go-only org with one Markdown file in a PR should not see a "Markdown is anomalous" bullet. Most CI files are YAML and are exempted naturally by this rule.
 
-The seed lists above are documented here rather than configurable: the same maintainer-vs-user-knob argument that dropped `extra_manifests` applies. If a real project breaks the seed, that's a PR to extend the seed.
+The seed lists above are documented here rather than configurable: the same maintainer-vs-user-knob argument that dropped `extra_manifests` applies. If a real codebase breaks the seed, that's a PR to extend the seed.
 
 ## Loader policy
 
@@ -111,7 +111,7 @@ Rebuilt on `github.com/alecthomas/kong`. Single struct, declarative tags.
 
 ```go
 type cli struct {
-    Config string `help:"Path to project config file." short:"c" type:"existingfile"`
+    Config string `help:"Path to org config file." short:"c" type:"existingfile"`
     PR     string `arg:"" help:"PR ref: owner/repo#number or full GitHub PR URL."`
 }
 ```
@@ -171,7 +171,7 @@ risky paths touched: billing/charge.go
 
 No `languages anomalous: Markdown` because Markdown is non-programming.
 
-**Same project, oversized PR** (8,000 + 200, `max_loc: 1000`) with an unexpected Rust file:
+**Same org, oversized PR** (8,000 + 200, `max_loc: 1000`) with an unexpected Rust file:
 
 ```
 PR #420 sarahmaeve https://github.com/example/repo/pull/420
@@ -223,11 +223,11 @@ Order:
 
 ## Non-goals reminder
 
-We emit signals; we do not enforce. `languages anomalous: Rust` produces a bullet, not an exit code. `max_loc: 1000` produces a bullet, not a refusal to render. Anomalies are softened from "banned" deliberately — pr-analyzer reports the project's posture against detected reality, never imposes.
+We emit signals; we do not enforce. `languages anomalous: Rust` produces a bullet, not an exit code. `max_loc: 1000` produces a bullet, not a refusal to render. Anomalies are softened from "banned" deliberately — pr-analyzer reports the org's posture against detected reality, never imposes.
 
 ## Resolved decisions
 
 - **Renderer signature.** `cli.Render(a Analysis, c render.Config) string`. Analysis carries the analyzer's output; render config is supplied separately by the caller.
 - **Discovery stops at filesystem root.** No git-root special case. Predictable behavior regardless of whether the user is inside a git checkout.
 - **Warning order.** Returned in load order (line-ascending). The CLI prints them to stderr in that order. Mirrors how a human reads the file.
-- **No CI-path detection in this slice.** The non-programming-language exemption already covers most CI files (they're typically YAML). The rare edge case of a Shell script inside `.github/workflows/` will count as Shell; if a project's posture lists don't include Shell, it surfaces as an anomaly. Acceptable.
+- **No CI-path detection in this slice.** The non-programming-language exemption already covers most CI files (they're typically YAML). The rare edge case of a Shell script inside `.github/workflows/` will count as Shell; if an org's posture lists don't include Shell, it surfaces as an anomaly. Acceptable.

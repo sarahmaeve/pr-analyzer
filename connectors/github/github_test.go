@@ -388,6 +388,81 @@ func TestClient_FetchPR_SendsRequiredHeaders(t *testing.T) {
 	}
 }
 
+// TestClient_ListOpenPRs_SignatoryFixture pins the parse path for the
+// listing endpoint introduced in slice 5. The fixture is the body of
+// a real-shape /pulls?state=open response trimmed to the fields the
+// connector reads; the assertion proves Number / Owner / Repo land on
+// the returned PRRefs in list order.
+func TestClient_ListOpenPRs_SignatoryFixture(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/sarahmaeve/signatory/pulls", func(w http.ResponseWriter, r *http.Request) {
+		// The connector must send state=open; otherwise the upstream
+		// returns closed PRs too and the report is wrong. Pin it.
+		if got := r.URL.Query().Get("state"); got != "open" {
+			t.Errorf("?state = %q, want open", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		http.ServeFile(w, r, "testdata/signatory_pulls_open.json")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+	refs, err := c.ListOpenPRs(context.Background(), "sarahmaeve", "signatory")
+	if err != nil {
+		t.Fatalf("ListOpenPRs: %v", err)
+	}
+
+	want := []analyzer.PRRef{
+		{Owner: "sarahmaeve", Repo: "signatory", Number: 144},
+		{Owner: "sarahmaeve", Repo: "signatory", Number: 142},
+		{Owner: "sarahmaeve", Repo: "signatory", Number: 141},
+	}
+	if len(refs) != len(want) {
+		t.Fatalf("len(refs) = %d, want %d", len(refs), len(want))
+	}
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Errorf("refs[%d] = %+v, want %+v", i, refs[i], want[i])
+		}
+	}
+}
+
+func TestClient_ListOpenPRs_FollowsPagination(t *testing.T) {
+	t.Parallel()
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/pulls" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "2" {
+			fmt.Fprintln(w, `[{"number": 12, "html_url": "https://github.com/o/r/pull/12"}]`)
+			return
+		}
+		w.Header().Set("Link", fmt.Sprintf(`<%s/repos/o/r/pulls?state=open&page=2>; rel="next"`, srv.URL))
+		fmt.Fprintln(w, `[{"number": 11, "html_url": "https://github.com/o/r/pull/11"}]`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+	refs, err := c.ListOpenPRs(context.Background(), "o", "r")
+	if err != nil {
+		t.Fatalf("ListOpenPRs: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("len(refs) = %d, want 2", len(refs))
+	}
+	if refs[0].Number != 11 || refs[1].Number != 12 {
+		t.Errorf("refs = [%d, %d], want [11, 12]", refs[0].Number, refs[1].Number)
+	}
+}
+
 func TestClient_FetchPR_404Error(t *testing.T) {
 	t.Parallel()
 
