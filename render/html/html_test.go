@@ -4,6 +4,7 @@ import (
 	stdjson "encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -234,7 +235,7 @@ func TestRender_severityPills(t *testing.T) {
 	}
 
 	// PR #3500 (OWNER) must not get an author-association pill.
-	pr3500 := isolatePR(t, out, 3500, 3429)
+	pr3500 := isolatePR(t, out, 3500)
 	if regexp.MustCompile(`pra-pill-\w+">OWNER`).MatchString(pr3500) {
 		t.Errorf("PR #3500 (OWNER) should not have an author-association pill:\n%s", pr3500)
 	}
@@ -265,7 +266,7 @@ func TestRender_severityPills(t *testing.T) {
 	// PR #3200 is CONTRIBUTOR — must wear the success (green) pill,
 	// not warning. This is the regression test for the "CONTRIBUTOR is
 	// positive signal" iteration.
-	pr3200 := isolatePR(t, out, 3200, 0)
+	pr3200 := isolatePR(t, out, 3200)
 	if !regexp.MustCompile(`pra-pill-success">CONTRIBUTOR`).MatchString(pr3200) {
 		t.Errorf("PR #3200 (CONTRIBUTOR) should wear pra-pill-success, not warning. Section:\n%s", pr3200)
 	}
@@ -286,7 +287,7 @@ func TestRender_locBarPerPRRatio(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 
-	pr3500Section := isolatePR(t, out, 3500, 3429)
+	pr3500Section := isolatePR(t, out, 3500)
 	if !regexp.MustCompile(`pra-pr-bar-add[^>]*flex-basis:\s*83`).MatchString(pr3500Section) {
 		t.Errorf("PR #3500 add segment should be ~83%% of fill; section:\n%s", pr3500Section)
 	}
@@ -294,7 +295,7 @@ func TestRender_locBarPerPRRatio(t *testing.T) {
 		t.Errorf("PR #3500 del segment should be ~16%% of fill; section:\n%s", pr3500Section)
 	}
 
-	pr3300Section := isolatePR(t, out, 3300, 3200)
+	pr3300Section := isolatePR(t, out, 3300)
 	if !regexp.MustCompile(`pra-pr-bar-add[^>]*flex-basis:\s*100`).MatchString(pr3300Section) {
 		t.Errorf("PR #3300 add segment should be 100%% of fill; section:\n%s", pr3300Section)
 	}
@@ -319,7 +320,7 @@ func TestRender_authorClass(t *testing.T) {
 	}
 
 	// PR #3100 is dependabot[bot] + CONTRIBUTOR — bot class must win.
-	pr3100 := isolatePR(t, out, 3100, 3200)
+	pr3100 := isolatePR(t, out, 3100)
 	if !strings.Contains(pr3100, "pra-pr-author-bot") {
 		t.Errorf("PR #3100 (dependabot[bot]) should carry pra-pr-author-bot; section:\n%s", pr3100)
 	}
@@ -328,13 +329,13 @@ func TestRender_authorClass(t *testing.T) {
 	}
 
 	// PR #3200 is polyglot + CONTRIBUTOR — human contributor green.
-	pr3200 := isolatePR(t, out, 3200, 0)
+	pr3200 := isolatePR(t, out, 3200)
 	if !strings.Contains(pr3200, "pra-pr-author-contributor") {
 		t.Errorf("PR #3200 (CONTRIBUTOR human) should carry pra-pr-author-contributor; section:\n%s", pr3200)
 	}
 
 	// PR #3500 is ellie + OWNER — no modifier class on the author link.
-	pr3500 := isolatePR(t, out, 3500, 3429)
+	pr3500 := isolatePR(t, out, 3500)
 	if strings.Contains(pr3500, "pra-pr-author-bot") || strings.Contains(pr3500, "pra-pr-author-contributor") {
 		t.Errorf("PR #3500 (OWNER, human) should have no author modifier class; section:\n%s", pr3500)
 	}
@@ -364,14 +365,14 @@ func TestRender_filesBar(t *testing.T) {
 	}
 
 	// PR #3200 has 20 files (the max in the fixture) — fill is 100%.
-	pr3200 := isolatePR(t, out, 3200, 0)
+	pr3200 := isolatePR(t, out, 3200)
 	if !regexp.MustCompile(`pra-pr-files-bar-fill[^>]*width:\s*100`).MatchString(pr3200) {
 		t.Errorf("PR #3200 (max files = 20) files-bar should be 100%%; section:\n%s", pr3200)
 	}
 
 	// PR #3429 has 1 file — fill must be markedly shorter (< 50%) so
 	// scanning the column reveals the amplitude difference.
-	pr3429 := isolatePR(t, out, 3429, 3300)
+	pr3429 := isolatePR(t, out, 3429)
 	m := regexp.MustCompile(`pra-pr-files-bar-fill[^>]*width:\s*([\d.]+)`).FindStringSubmatch(pr3429)
 	if m == nil {
 		t.Fatalf("PR #3429 files-bar-fill width not parseable from section:\n%s", pr3429)
@@ -396,7 +397,7 @@ func TestRender_locBarCrossPRScale(t *testing.T) {
 	}
 
 	// PR #3200 (max LOC = 1550) → fill width 100%.
-	pr3200 := isolatePR(t, out, 3200, 0)
+	pr3200 := isolatePR(t, out, 3200)
 	if !regexp.MustCompile(`pra-pr-bar-fill[^>]*width:\s*100`).MatchString(pr3200) {
 		t.Errorf("PR #3200 (max LOC) bar-fill should be 100%% wide; section:\n%s", pr3200)
 	}
@@ -406,7 +407,7 @@ func TestRender_locBarCrossPRScale(t *testing.T) {
 	// so a future scale-curve tweak doesn't break the test for the
 	// wrong reason — the regression we care about is "all bars at
 	// 100%" or "ratio inverted", not exact log curve.
-	pr3429 := isolatePR(t, out, 3429, 3300)
+	pr3429 := isolatePR(t, out, 3429)
 	m := regexp.MustCompile(`pra-pr-bar-fill[^>]*width:\s*([\d.]+)`).FindStringSubmatch(pr3429)
 	if m == nil {
 		t.Fatalf("PR #3429 bar-fill width not parseable from section:\n%s", pr3429)
@@ -426,38 +427,24 @@ func parseFloat(t *testing.T, s string) float64 {
 }
 
 // isolatePR returns the slice of `out` covering PR number `n` and
-// stopping just before PR number `stopBefore`. Used by tests that
-// need to assert on one PR's section without picking up signal from
-// a later PR.
-func isolatePR(t *testing.T, out string, n, stopBefore int) string {
+// stopping just before the next PR marker in the output. Used by
+// tests that need to assert on one PR's section without picking up
+// signal from a later PR. The next-PR boundary is derived from the
+// output itself rather than a caller-supplied stop number, so the
+// slice is always exactly one PR regardless of fixture order.
+func isolatePR(t *testing.T, out string, n int) string {
 	t.Helper()
-	start := strings.Index(out, "data-pra-pr-number=\""+itoa(n)+"\"")
+	const marker = `data-pra-pr-number="`
+	start := strings.Index(out, marker+strconv.Itoa(n)+`"`)
 	if start < 0 {
 		t.Fatalf("PR #%d marker not found", n)
 	}
-	end := strings.Index(out[start:], "data-pra-pr-number=\""+itoa(stopBefore)+"\"")
-	if end < 0 {
+	searchFrom := start + len(marker)
+	nextOffset := strings.Index(out[searchFrom:], marker)
+	if nextOffset < 0 {
 		return out[start:]
 	}
-	return out[start : start+end]
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b strings.Builder
-	if n < 0 {
-		b.WriteByte('-')
-		n = -n
-	}
-	digits := []byte{}
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	b.Write(digits)
-	return b.String()
+	return out[start : searchFrom+nextOffset]
 }
 
 // TestRender_inlinedJSONRoundTrips proves the script-tag JSON block

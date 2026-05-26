@@ -179,6 +179,6 @@ func parseTypeErrorEntry(s string) Warning {
 	if m == nil {
 		return Warning{Message: s}
 	}
-	line, _ := strconv.Atoi(m[1])
+	line, _ := strconv.Atoi(m[1]) // safe: regex \d+ guarantees the capture is digits-only
 	return Warning{Line: line, Message: m[2]}
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 	"github.com/sarahmaeve/pr-analyzer/codeshape"
@@ -181,5 +182,46 @@ func TestSummarize_authorAssociationSortedByCountDesc(t *testing.T) {
 				name, pos, lastPos)
 		}
 		lastPos = pos
+	}
+}
+
+// TestTruncateField_RuneAware pins the contract documented on
+// truncateField: the maxLen budget is measured in runes, not bytes,
+// and the output must always be valid UTF-8. GitHub usernames and PR
+// titles routinely contain emoji and non-Latin scripts, and a byte-
+// based implementation slices in the middle of a multi-byte rune,
+// emitting a replacement glyph in terminals that consume the output.
+func TestTruncateField_RuneAware(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		in     string
+		maxLen int
+		want   string
+	}{
+		{"empty", "", 20, ""},
+		{"ascii shorter than max", "alice", 20, "alice"},
+		{"ascii exactly at max", "abcdefghijklmnopqrst", 20, "abcdefghijklmnopqrst"},
+		{"ascii longer than max", "this title is much longer than twenty", 20, "this title is much …"},
+		// 20 runes, 23 bytes — under the rune budget, byte-len check would falsely truncate.
+		{"unicode within rune budget", "naïvely-namedusertag", 20, "naïvely-namedusertag"},
+		// 22 runes, 23 bytes — over the rune budget, must clip at rune 19 + ellipsis.
+		{"unicode over rune budget", "naïvely-named-user-tag", 20, "naïvely-named-user-…"},
+		// 4-byte runes: 5 emoji = 5 runes, 20 bytes. With maxLen=10, byte impl returns unchanged
+		// (20 > 10 but slicing s[:9] mid-emoji); rune impl truncates to 9 runes + ellipsis.
+		{"emoji over rune budget", "🙂🙃🙂🙃🙂🙃🙂🙃🙂🙃", 6, "🙂🙃🙂🙃🙂…"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := truncateField(tc.in, tc.maxLen)
+			if got != tc.want {
+				t.Errorf("truncateField(%q, %d) = %q, want %q", tc.in, tc.maxLen, got, tc.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("truncateField(%q, %d) = %q is not valid UTF-8", tc.in, tc.maxLen, got)
+			}
+		})
 	}
 }

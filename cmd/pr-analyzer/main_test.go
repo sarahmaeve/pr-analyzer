@@ -1117,3 +1117,78 @@ func TestSmoke_DoesNotInheritParentGitHubToken(t *testing.T) {
 		t.Errorf("Authorization header leaked parent secret: %q", auth)
 	}
 }
+
+// fakePRSource is a minimal in-memory PRSource for runList tests. The
+// caller supplies the open-PRs list and the per-PR fetch behavior;
+// tests use it to drive the loop without standing up an HTTP server.
+type fakePRSource struct {
+	refs    []analyzer.PRRef
+	onFetch func(ctx context.Context, ref analyzer.PRRef) (analyzer.PR, error)
+}
+
+func (f *fakePRSource) ListOpenPRs(_ context.Context, _, _ string) ([]analyzer.PRRef, error) {
+	return f.refs, nil
+}
+
+func (f *fakePRSource) FetchPR(ctx context.Context, ref analyzer.PRRef) (analyzer.PR, error) {
+	return f.onFetch(ctx, ref)
+}
+
+// TestRunList_AbortsCleanlyOnContextCancellation pins the rule that
+// a cancelled context aborts the scan immediately and surfaces the
+// cancellation as the returned error, rather than misreporting it as
+// N separate per-PR "skipping" warnings. A real-world timeout on a
+// 100-PR scan would otherwise produce ~50 noisy lines on stderr and
+// silently write a partial report.
+func TestRunList_AbortsCleanlyOnContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	refs := []analyzer.PRRef{
+		{Owner: "o", Repo: "r", Number: 1},
+		{Owner: "o", Repo: "r", Number: 2},
+		{Owner: "o", Repo: "r", Number: 3},
+		{Owner: "o", Repo: "r", Number: 4},
+		{Owner: "o", Repo: "r", Number: 5},
+	}
+
+	var fetched atomic.Int32
+	src := &fakePRSource{
+		refs: refs,
+		onFetch: func(ctx context.Context, ref analyzer.PRRef) (analyzer.PR, error) {
+			n := fetched.Add(1)
+			if n == 1 {
+				// First PR succeeds; cancellation lands after.
+				cancel()
+				return analyzer.PR{Ref: ref, Title: "first"}, nil
+			}
+			// Subsequent fetches observe the cancelled context, the way
+			// http.NewRequestWithContext does in production.
+			return analyzer.PR{}, ctx.Err()
+		},
+	}
+
+	tgt := target{Owner: "o", Repo: "r"}
+	var stdout, stderr bytes.Buffer
+	err := runList(ctx, src, tgt, analyzer.Config{}, t.TempDir(), &stdout, &stderr)
+
+	if err == nil {
+		t.Fatal("runList: expected error on cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v should wrap context.Canceled", err)
+	}
+	// The loop must not log per-PR "skipping" warnings for the four PRs
+	// that follow the cancellation; one clean abort beats four noisy lines.
+	if got := strings.Count(stderr.String(), "skipping PR"); got > 0 {
+		t.Errorf("stderr has %d 'skipping PR' warnings on a cancelled scan; want 0\nstderr:\n%s",
+			got, stderr.String())
+	}
+	// Only the first PR's FetchPR should have run before we noticed the
+	// cancellation at the top of the next iteration.
+	if got := fetched.Load(); got != 1 {
+		t.Errorf("FetchPR called %d times on a cancelled scan; want 1 (top-of-loop ctx check should stop further fetches)", got)
+	}
+}

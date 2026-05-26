@@ -41,7 +41,7 @@ func TestClient_FetchPR_TrapdoorFixture(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	pr, err := c.FetchPR(context.Background(), analyzer.PRRef{
+	pr, err := c.FetchPR(t.Context(), analyzer.PRRef{
 		Owner: "agentforge", Repo: "copilot-toolkit", Number: 47,
 	})
 	if err != nil {
@@ -145,7 +145,7 @@ func TestClient_FetchPR_PR144Fixture(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	pr, err := c.FetchPR(context.Background(), analyzer.PRRef{
+	pr, err := c.FetchPR(t.Context(), analyzer.PRRef{
 		Owner: "sarahmaeve", Repo: "signatory", Number: 144,
 	})
 	if err != nil {
@@ -234,7 +234,7 @@ func TestClient_FetchPR_FollowsPagination(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	pr, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	pr, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
 	if err != nil {
 		t.Fatalf("FetchPR: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestClient_FetchPR_RejectsOffHostNextLink(t *testing.T) {
 	t.Cleanup(legitSrv.Close)
 
 	c := github.NewClient(legitSrv.Client(), legitSrv.URL)
-	_, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	_, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
 	if err == nil {
 		t.Fatal("expected error when next-link points off-origin, got nil")
 	}
@@ -303,7 +303,7 @@ func TestClient_FetchPR_MalformedJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	_, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	_, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
 	if err == nil {
 		t.Fatal("expected decode error, got nil")
 	}
@@ -366,7 +366,7 @@ func TestClient_FetchPR_SendsRequiredHeaders(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	if _, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1}); err != nil {
+	if _, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1}); err != nil {
 		t.Fatalf("FetchPR: %v", err)
 	}
 
@@ -410,7 +410,7 @@ func TestClient_ListOpenPRs_SignatoryFixture(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	refs, err := c.ListOpenPRs(context.Background(), "sarahmaeve", "signatory")
+	refs, err := c.ListOpenPRs(t.Context(), "sarahmaeve", "signatory")
 	if err != nil {
 		t.Fatalf("ListOpenPRs: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestClient_ListOpenPRs_FollowsPagination(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	refs, err := c.ListOpenPRs(context.Background(), "o", "r")
+	refs, err := c.ListOpenPRs(t.Context(), "o", "r")
 	if err != nil {
 		t.Fatalf("ListOpenPRs: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestClient_FetchPR_404Error(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := github.NewClient(srv.Client(), srv.URL)
-	_, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "x", Repo: "y", Number: 1})
+	_, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "x", Repo: "y", Number: 1})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

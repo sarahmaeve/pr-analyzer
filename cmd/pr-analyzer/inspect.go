@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 	rhtml "github.com/sarahmaeve/pr-analyzer/render/html"
@@ -278,13 +279,9 @@ func writeCountedRows(b *strings.Builder, counts map[string]int) {
 	)
 	width := minWidth
 	for k := range counts {
-		if w := len(k); w > width {
-			width = w
-		}
+		width = max(width, len(k))
 	}
-	if width > maxWidth {
-		width = maxWidth
-	}
+	width = min(width, maxWidth)
 	for _, r := range rows {
 		fmt.Fprintf(b, "  %-*s %4d\n", width, r.key, r.count)
 	}
@@ -292,13 +289,16 @@ func writeCountedRows(b *strings.Builder, counts map[string]int) {
 
 // truncateField clips s to maxLen runes, appending an ellipsis if the
 // input was longer. Used to keep the LOC top-5 table from wrapping on
-// PRs with novella-length titles.
+// PRs with novella-length titles. Rune-aware so emoji and non-Latin
+// scripts in author logins / titles render cleanly instead of as a
+// replacement glyph.
 func truncateField(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
 	if maxLen < 1 {
 		return ""
 	}
-	return s[:maxLen-1] + "…"
+	if utf8.RuneCountInString(s) <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxLen-1]) + "…"
 }

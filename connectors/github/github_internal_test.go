@@ -1,7 +1,6 @@
 package github
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,7 +53,7 @@ func TestClient_BodySizeLimitEnforcement(t *testing.T) {
 			c := NewClient(srv.Client(), srv.URL)
 			c.maxResponseBytes = tc.maxBytes
 
-			_, err := c.FetchPR(context.Background(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+			_, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}

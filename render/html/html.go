@@ -87,12 +87,8 @@ func Render(env rjson.Envelope) (string, error) {
 	maxLOC := 0
 	maxFiles := 0
 	for _, a := range env.Analyses {
-		if a.CodeShape.LOC.Total > maxLOC {
-			maxLOC = a.CodeShape.LOC.Total
-		}
-		if a.PR.ChangedFiles > maxFiles {
-			maxFiles = a.PR.ChangedFiles
-		}
+		maxLOC = max(maxLOC, a.CodeShape.LOC.Total)
+		maxFiles = max(maxFiles, a.PR.ChangedFiles)
 	}
 
 	views := make([]analysisView, len(env.Analyses))

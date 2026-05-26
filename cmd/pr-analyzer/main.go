@@ -180,6 +180,13 @@ func runList(ctx context.Context, src analyzer.PRSource, tgt target, cfg analyze
 
 	analyses := make([]analyzer.Analysis, 0, len(refs))
 	for i, ref := range refs {
+		// Top-of-loop cancellation check: a timeout or Ctrl+C reaches us as
+		// ctx.Err(), and without this every remaining PR would be logged
+		// as a per-PR "skipping" warning — drowning the real cause and
+		// silently writing a partial report. One clean abort instead.
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("scan aborted: %w", err)
+		}
 		fmt.Fprintf(stderr, "[%d/%d] PR #%d\n", i+1, len(refs), ref.Number)
 		analysis, err := analyzer.Analyze(ctx, src, ref, analyzer.WithConfig(cfg))
 		if err != nil {
