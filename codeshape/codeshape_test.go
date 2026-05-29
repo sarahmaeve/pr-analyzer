@@ -275,6 +275,26 @@ func TestDetectLanguages_and_BucketLanguages(t *testing.T) {
 	}
 }
 
+// TestTouchedManifests pins the exported manifest catalog matcher shared
+// with importers (signatory's pr-scan): basename match against known
+// dependency manifests/lockfiles, order-preserving, subdir-aware.
+func TestTouchedManifests(t *testing.T) {
+	t.Parallel()
+	files := []codeshape.File{
+		{Path: "go.mod"},
+		{Path: "src/app.go"},
+		{Path: "frontend/package-lock.json"},
+		{Path: "crates/x/Cargo.toml"},
+		{Path: "README.md"},
+		{Path: "go.mod.bak"}, // not a manifest (basename differs)
+	}
+	got := codeshape.TouchedManifests(files)
+	want := []string{"go.mod", "frontend/package-lock.json", "crates/x/Cargo.toml"}
+	if !slices.Equal(got, want) {
+		t.Errorf("TouchedManifests = %v, want %v", got, want)
+	}
+}
+
 func TestCollect_AgentConfigPathsTouched(t *testing.T) {
 	t.Parallel()
 

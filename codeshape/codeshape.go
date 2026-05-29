@@ -75,7 +75,7 @@ func Collect(in Input) Signals {
 	return Signals{
 		LOC:                     loc,
 		TestsTouched:            anyTestFile(in.Files),
-		ManifestsTouched:        touchedManifests(in.Files),
+		ManifestsTouched:        TouchedManifests(in.Files),
 		Languages:               languages,
 		RiskyPathsTouched:       touchedRiskyPaths(in.Files, in.Config.RiskyPaths),
 		AgentConfigPathsTouched: touchedAgentConfig(in.Files),
@@ -281,7 +281,12 @@ var manifestBasenames = map[string]struct{}{
 	"Gemfile.lock":      {},
 }
 
-func touchedManifests(files []File) []string {
+// TouchedManifests returns the PR file paths whose basename is a known
+// dependency manifest or lockfile (go.mod, package.json, Cargo.toml/lock,
+// requirements.txt, Gemfile/lock, …). Output preserves file-list order.
+// Exported so other tools (signatory's pr-scan) flag dependency-manifest
+// changes from the same catalog rather than a divergent one.
+func TouchedManifests(files []File) []string {
 	var out []string
 	for _, f := range files {
 		if _, ok := manifestBasenames[path.Base(f.Path)]; ok {
