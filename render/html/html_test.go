@@ -492,12 +492,19 @@ func TestRender_escapesScriptInjection(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 
-	// The literal "</script>" must not appear except as the legitimate
-	// closer of the pra-data block itself. We assert by counting: one
-	// </script> for the data block, and zero others.
-	count := strings.Count(out, "</script>")
-	if count != 1 {
-		t.Errorf("expected exactly one </script> in output (the data block closer), got %d", count)
+	// The page has three legitimate <script> elements (the pra-data
+	// block, the sidecar <script src>, and the inline loader). A
+	// user-controlled "</script>" leaking from the title would close one
+	// early, leaving more closers than openers — so balance is the real
+	// invariant, robust to adding/removing legitimate scripts.
+	if opens, closes := strings.Count(out, "<script"), strings.Count(out, "</script>"); opens != closes {
+		t.Errorf("unbalanced <script> tags (opens=%d, closes=%d) — a user-controlled </script> likely leaked", opens, closes)
+	}
+	// The literal injected closer must not survive verbatim (encoding/json
+	// renders the title's "<" as < in the data block, and
+	// html/template escapes it in the summary).
+	if strings.Contains(out, "</script><img") {
+		t.Error("user-controlled </script><img> leaked verbatim into the output")
 	}
 	// The injected <img> payload must not survive as a real element —
 	// the actual security property. After html/template's escape, "<img"
@@ -564,5 +571,72 @@ func TestRender_emptyAnalyses(t *testing.T) {
 	}
 	if !strings.Contains(out, "o/r") {
 		t.Error("empty-envelope render missing repo header")
+	}
+}
+
+// TestRender_includesSidecarLoader proves the page always carries the
+// out-of-band enrichment plumbing — the <script src> for the sidecar and
+// the inline loader — but bakes in NO deep sections itself: enrichment is
+// layered at view time from the sidecar, so index.html is identical
+// whether or not anything was scanned.
+func TestRender_includesSidecarLoader(t *testing.T) {
+	t.Parallel()
+
+	out, err := html.Render(fixtureEnvelope())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	wants := []string{
+		`<script src="pr-scan.js"></script>`, // optional sidecar, file://-safe
+		"window.__praEnrichment",             // loader reads this global
+		"pra-pr-deep",                        // loader builds sections with this class
+		"querySelectorAll",                   // loader walks the PR list
+		"pra-pr-scanned",                     // loader flags a scanned PR's summary row
+		"pra-pr-scan-flag",                   // verdict badge injected into that row
+	}
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Errorf("render missing sidecar-loader plumbing %q", w)
+		}
+	}
+	// No deep section is server-rendered — the markup only appears after
+	// the loader runs against a sidecar in the browser.
+	if strings.Contains(out, `class="pra-pr-deep"`) {
+		t.Error("Render must not bake deep sections into the page (they are injected client-side)")
+	}
+}
+
+// TestSidecarJS_roundTrips proves SidecarJS emits a single assignment of
+// the enrichment JSON to the loader's global, and that the JSON payload
+// round-trips back to the same Enrichment.
+func TestSidecarJS_roundTrips(t *testing.T) {
+	t.Parallel()
+
+	in := html.Enrichment{
+		3429: []html.Section{{
+			Title: "pr-scan deep findings",
+			Pills: []html.Pill{{Text: "BLOCK", Tier: "danger"}},
+			Rows:  []html.Row{{Term: "Exfil host", Detail: "webhook.site (init.go:5)"}},
+		}},
+	}
+	js, err := html.SidecarJS(in)
+	if err != nil {
+		t.Fatalf("SidecarJS: %v", err)
+	}
+	body := string(js)
+	const prefix = "window.__praEnrichment = "
+	if !strings.HasPrefix(body, prefix) {
+		t.Fatalf("sidecar must assign the loader global; got:\n%s", body)
+	}
+	if html.SidecarFilename != "pr-scan.js" {
+		t.Errorf("SidecarFilename = %q, want pr-scan.js (the name the page's <script src> expects)", html.SidecarFilename)
+	}
+	payload := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(body, prefix)), ";")
+	var got html.Enrichment
+	if err := stdjson.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatalf("sidecar JSON does not round-trip: %v\npayload:\n%s", err, payload)
+	}
+	if len(got[3429]) != 1 || got[3429][0].Pills[0].Text != "BLOCK" {
+		t.Errorf("round-tripped enrichment lost data: %+v", got)
 	}
 }
