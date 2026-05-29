@@ -213,7 +213,7 @@ func TestClient_FetchPR_SurfacesCommitSHAs(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/o/r/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, `{"number":1,"title":"x","html_url":"u","state":"open","draft":false,
-			"user":{"login":"u"},
+			"user":{"login":"u","type":"User"},
 			"base":{"ref":"main","sha":"baaaaaa0000000000000000000000000000000a"},
 			"head":{"ref":"feat","sha":"heeeeee1111111111111111111111111111111b"},
 			"additions":1,"deletions":0,"changed_files":1,"labels":[],
@@ -236,6 +236,9 @@ func TestClient_FetchPR_SurfacesCommitSHAs(t *testing.T) {
 	}
 	if pr.BaseSHA != "baaaaaa0000000000000000000000000000000a" {
 		t.Errorf("BaseSHA = %q, want base sha", pr.BaseSHA)
+	}
+	if pr.AuthorType != "User" {
+		t.Errorf("AuthorType = %q, want User", pr.AuthorType)
 	}
 }
 

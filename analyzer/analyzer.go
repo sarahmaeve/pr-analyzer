@@ -45,6 +45,11 @@ type PR struct {
 	// their platform exposes; the analyzer and renderer treat the
 	// value as opaque below the rendering layer.
 	AuthorAssociation string `json:"author_association"`
+	// AuthorType is the GitHub user object's type for the PR author:
+	// "User", "Bot", or "Organization". Connectors that can't supply it
+	// leave it empty. Lets consumers distinguish a human contributor
+	// from an App/bot identity (dependabot[bot] etc.).
+	AuthorType string `json:"author_type"`
 }
 
 type PRFile struct {
