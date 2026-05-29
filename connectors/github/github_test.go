@@ -203,6 +203,42 @@ func TestClient_FetchPR_PR144Fixture(t *testing.T) {
 	}
 }
 
+// TestClient_FetchPR_SurfacesCommitSHAs pins that the connector carries
+// the base/head commit SHAs from the PR-detail response. They are needed
+// by downstream deep analysis (signatory checks out / reads blobs at the
+// exact head commit) and were previously discarded by refPayload.
+func TestClient_FetchPR_SurfacesCommitSHAs(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/o/r/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, `{"number":1,"title":"x","html_url":"u","state":"open","draft":false,
+			"user":{"login":"u"},
+			"base":{"ref":"main","sha":"baaaaaa0000000000000000000000000000000a"},
+			"head":{"ref":"feat","sha":"heeeeee1111111111111111111111111111111b"},
+			"additions":1,"deletions":0,"changed_files":1,"labels":[],
+			"author_association":"CONTRIBUTOR",
+			"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`)
+	})
+	mux.HandleFunc("/repos/o/r/pulls/1/files", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, `[]`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+	pr, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	if err != nil {
+		t.Fatalf("FetchPR error: %v", err)
+	}
+	if pr.HeadSHA != "heeeeee1111111111111111111111111111111b" {
+		t.Errorf("HeadSHA = %q, want head sha", pr.HeadSHA)
+	}
+	if pr.BaseSHA != "baaaaaa0000000000000000000000000000000a" {
+		t.Errorf("BaseSHA = %q, want base sha", pr.BaseSHA)
+	}
+}
+
 func TestClient_FetchPR_FollowsPagination(t *testing.T) {
 	t.Parallel()
 

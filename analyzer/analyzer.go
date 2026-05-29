@@ -16,14 +16,19 @@ type PRRef struct {
 }
 
 type PR struct {
-	Ref          PRRef     `json:"ref"`
-	Title        string    `json:"title"`
-	Author       string    `json:"author"`
-	URL          string    `json:"url"`
-	State        string    `json:"state"`
-	Draft        bool      `json:"draft"`
-	BaseRef      string    `json:"base_ref"`
-	HeadRef      string    `json:"head_ref"`
+	Ref     PRRef  `json:"ref"`
+	Title   string `json:"title"`
+	Author  string `json:"author"`
+	URL     string `json:"url"`
+	State   string `json:"state"`
+	Draft   bool   `json:"draft"`
+	BaseRef string `json:"base_ref"`
+	HeadRef string `json:"head_ref"`
+	// BaseSHA / HeadSHA are the base/head commit SHAs from the connector.
+	// Empty when the connector cannot supply them. Downstream deep
+	// analysis pins reads to HeadSHA (the exact commit the PR proposes).
+	BaseSHA      string    `json:"base_sha"`
+	HeadSHA      string    `json:"head_sha"`
 	Additions    int       `json:"additions"`
 	Deletions    int       `json:"deletions"`
 	ChangedFiles int       `json:"changed_files"`
