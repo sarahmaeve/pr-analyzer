@@ -125,8 +125,12 @@ func SidecarJS(e Enrichment) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal enrichment: %w", err)
 	}
-	// Defense in depth: keep a hostile finding string from terminating
-	// the surrounding <script> element. \/ decodes to / — a no-op.
+	// Defense in depth: encoding/json already escapes '<' as <, so a
+	// hostile finding string cannot emit a literal "</" here, and the
+	// sidecar is delivered as an external <script src> where "</script>"
+	// has no termination semantics anyway. This substitution is therefore
+	// a belt-and-suspenders no-op (\/ decodes to /) that still holds if a
+	// future change ever inlines these bytes into a <script> block.
 	body = bytes.ReplaceAll(body, []byte("</"), []byte("<\\/"))
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "window.%s = ", sidecarGlobal)

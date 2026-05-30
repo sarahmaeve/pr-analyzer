@@ -201,6 +201,20 @@ func TestClient_FetchPR_PR144Fixture(t *testing.T) {
 	if pr.AuthorAssociation != "OWNER" {
 		t.Errorf("AuthorAssociation = %q, want OWNER", pr.AuthorAssociation)
 	}
+	// Read from the captured real-API shape: AuthorType from the top-level
+	// user.type (not the nested head.user/base.user, which also say
+	// "User"), and the commit SHAs from base.sha/head.sha (not
+	// merge_commit_sha). A fixture edit that drops or relocates these now
+	// fails here.
+	if pr.AuthorType != "User" {
+		t.Errorf("AuthorType = %q, want User", pr.AuthorType)
+	}
+	if pr.HeadSHA != "71f64dffb752eafb480cda11671ce1a317ec99ad" {
+		t.Errorf("HeadSHA = %q, want 71f64dffb752eafb480cda11671ce1a317ec99ad", pr.HeadSHA)
+	}
+	if pr.BaseSHA != "940b7ec7c47b9eee929b8734af585cbe711f2739" {
+		t.Errorf("BaseSHA = %q, want 940b7ec7c47b9eee929b8734af585cbe711f2739", pr.BaseSHA)
+	}
 }
 
 // TestClient_FetchPR_SurfacesCommitSHAs pins that the connector carries
@@ -239,6 +253,43 @@ func TestClient_FetchPR_SurfacesCommitSHAs(t *testing.T) {
 	}
 	if pr.AuthorType != "User" {
 		t.Errorf("AuthorType = %q, want User", pr.AuthorType)
+	}
+}
+
+// TestClient_FetchPR_EmptyWhenConnectorOmitsFields pins the documented
+// sentinel (analyzer.PR.AuthorType/BaseSHA/HeadSHA: "empty when the
+// connector cannot supply them"): a payload that omits user.type and the
+// base/head SHAs must leave those fields empty rather than substituting a
+// placeholder, and decoding the absent nested objects must not panic.
+// Downstream deep analysis uses "" as the can't-supply signal.
+func TestClient_FetchPR_EmptyWhenConnectorOmitsFields(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/o/r/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, `{"number":1,"title":"x","html_url":"u","state":"open","draft":false,
+			"user":{"login":"u"},
+			"base":{"ref":"main"},"head":{"ref":"feat"},
+			"additions":1,"deletions":0,"changed_files":0,"labels":[],
+			"author_association":"CONTRIBUTOR",
+			"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`)
+	})
+	mux.HandleFunc("/repos/o/r/pulls/1/files", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, `[]`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := github.NewClient(srv.Client(), srv.URL)
+	pr, err := c.FetchPR(t.Context(), analyzer.PRRef{Owner: "o", Repo: "r", Number: 1})
+	if err != nil {
+		t.Fatalf("FetchPR error: %v", err)
+	}
+	if pr.AuthorType != "" {
+		t.Errorf("AuthorType = %q, want empty (connector did not supply user.type)", pr.AuthorType)
+	}
+	if pr.HeadSHA != "" || pr.BaseSHA != "" {
+		t.Errorf("Head/BaseSHA = %q/%q, want empty (connector did not supply sha)", pr.HeadSHA, pr.BaseSHA)
 	}
 }
 

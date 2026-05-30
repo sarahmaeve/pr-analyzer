@@ -1,7 +1,6 @@
 package engineerprofile
 
 import (
-	"bufio"
 	"bytes"
 	pathpkg "path"
 	"slices"
@@ -59,9 +58,12 @@ func ParseCodeowners(content []byte, authorLogin string, changedPaths []string) 
 
 func parseCodeownersRules(content []byte) []codeownersRule {
 	var rules []codeownersRule
-	sc := bufio.NewScanner(bytes.NewReader(content))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+	// Iterate the whole in-memory buffer line by line. bytes.Lines has no
+	// per-line size cap (unlike bufio.Scanner's default 64 KiB token
+	// limit), so a pathologically long line in an attacker-editable
+	// CODEOWNERS cannot silently truncate the rules that follow it.
+	for raw := range bytes.Lines(content) {
+		line := strings.TrimSpace(string(raw))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}

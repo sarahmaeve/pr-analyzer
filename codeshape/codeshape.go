@@ -163,15 +163,19 @@ func stringSet(s []string) map[string]struct{} {
 // MatchesRiskyPath reports whether a single repo-relative path is covered
 // by one of the configured risky-path prefixes. Match semantics: a
 // pattern P matches a path F iff P == F or P + "/" is a prefix of F (no
-// wildcards). Exported so other tools consuming a shared pr-analyzer.yaml
-// (e.g. signatory's pr-scan) apply the same org policy to a changelist
-// without reimplementing — and possibly diverging from — the rule.
-func MatchesRiskyPath(path string, patterns []string) bool {
+// wildcards). Matching is byte-exact and case-sensitive and applies no
+// path normalization, so external callers must pass cleaned, slash-
+// separated repo-relative paths — the form pr-analyzer's own connectors
+// already emit. Exported so other tools consuming a shared
+// pr-analyzer.yaml (e.g. signatory's pr-scan) apply the same org policy
+// to a changelist without reimplementing — and possibly diverging from —
+// the rule.
+func MatchesRiskyPath(filePath string, patterns []string) bool {
 	for _, p := range patterns {
 		if p == "" {
 			continue
 		}
-		if path == p || strings.HasPrefix(path, p+"/") {
+		if filePath == p || strings.HasPrefix(filePath, p+"/") {
 			return true
 		}
 	}

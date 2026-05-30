@@ -256,9 +256,10 @@ func TestDetectLanguages_and_BucketLanguages(t *testing.T) {
 		{Path: ".github/workflows/ci.yaml"}, // YAML (markup, excluded)
 	}
 	detected := codeshape.DetectLanguages(files)
-	// Sorted, unique; includes markup in raw detection.
-	if !slices.Contains(detected, "Go") || !slices.Contains(detected, "Rust") {
-		t.Fatalf("DetectLanguages missing Go/Rust: %v", detected)
+	// Full contract: sorted, unique, and markup IS present in raw
+	// detection (bucketing excludes markup later; detection does not).
+	if want := []string{"Go", "Markdown", "Rust", "YAML"}; !slices.Equal(detected, want) {
+		t.Fatalf("DetectLanguages = %v, want %v (sorted, unique, markup included)", detected, want)
 	}
 
 	posture := codeshape.BucketLanguages(detected, codeshape.LanguageConfig{Preferred: []string{"Go"}})

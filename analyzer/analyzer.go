@@ -24,9 +24,13 @@ type PR struct {
 	Draft   bool   `json:"draft"`
 	BaseRef string `json:"base_ref"`
 	HeadRef string `json:"head_ref"`
-	// BaseSHA / HeadSHA are the base/head commit SHAs from the connector.
-	// Empty when the connector cannot supply them. Downstream deep
-	// analysis pins reads to HeadSHA (the exact commit the PR proposes).
+	// BaseSHA / HeadSHA are the base/head commit SHAs as reported by the
+	// connector, carried verbatim and NOT validated as well-formed object
+	// names. Empty when the connector cannot supply them. They identify
+	// the commit the PR proposes (HeadSHA) for downstream deep analysis; a
+	// consumer that resolves HeadSHA to a git ref, path, or command
+	// argument must validate its shape first — it is connector-defined,
+	// opaque data, not a trusted SHA.
 	BaseSHA      string    `json:"base_sha"`
 	HeadSHA      string    `json:"head_sha"`
 	Additions    int       `json:"additions"`
