@@ -217,6 +217,85 @@ func TestCollect_RiskyPathsTouched(t *testing.T) {
 	}
 }
 
+// TestMatchesRiskyPath pins the exported single-path matcher's contract —
+// the rule shared with importers like signatory's pr-scan. Prefix match is
+// path-segment-bounded (a pattern matches the dir and everything beneath,
+// not a sibling sharing a name prefix); empty patterns are ignored.
+func TestMatchesRiskyPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		path     string
+		patterns []string
+		want     bool
+	}{
+		{"billing/charge.go", []string{"billing"}, true},   // dir prefix
+		{"billing", []string{"billing"}, true},             // exact
+		{"billingsystem/x.go", []string{"billing"}, false}, // segment-bounded: not a sibling
+		{"src/foo.go", []string{"billing"}, false},         // no match
+		{"a/b/c.go", []string{"a/b"}, true},                // nested dir prefix
+		{"billing/x.go", nil, false},                       // no patterns
+		{"billing/x.go", []string{""}, false},              // empty pattern ignored
+	}
+	for _, tc := range tests {
+		if got := codeshape.MatchesRiskyPath(tc.path, tc.patterns); got != tc.want {
+			t.Errorf("MatchesRiskyPath(%q, %v) = %v, want %v", tc.path, tc.patterns, got, tc.want)
+		}
+	}
+}
+
+// TestDetectLanguages_and_BucketLanguages pins the exported language
+// weighting shared with importers (signatory's pr-scan): path-based
+// detection, and posture bucketing that excludes markup and flags an
+// unlisted programming language as Anomalous.
+func TestDetectLanguages_and_BucketLanguages(t *testing.T) {
+	t.Parallel()
+	files := []codeshape.File{
+		{Path: "cmd/main.go"},               // Go
+		{Path: "crates/x/src/lib.rs"},       // Rust
+		{Path: "README.md"},                 // Markdown (markup, excluded)
+		{Path: ".github/workflows/ci.yaml"}, // YAML (markup, excluded)
+	}
+	detected := codeshape.DetectLanguages(files)
+	// Full contract: sorted, unique, and markup IS present in raw
+	// detection (bucketing excludes markup later; detection does not).
+	if want := []string{"Go", "Markdown", "Rust", "YAML"}; !slices.Equal(detected, want) {
+		t.Fatalf("DetectLanguages = %v, want %v (sorted, unique, markup included)", detected, want)
+	}
+
+	posture := codeshape.BucketLanguages(detected, codeshape.LanguageConfig{Preferred: []string{"Go"}})
+	if !slices.Equal(posture.Preferred, []string{"Go"}) {
+		t.Errorf("Preferred = %v, want [Go]", posture.Preferred)
+	}
+	if !slices.Equal(posture.Anomalous, []string{"Rust"}) {
+		t.Errorf("Anomalous = %v, want [Rust] (markup excluded, unlisted prog lang flagged)", posture.Anomalous)
+	}
+
+	// No posture configured → no opinion.
+	if got := codeshape.BucketLanguages(detected, codeshape.LanguageConfig{}); len(got.Anomalous) != 0 {
+		t.Errorf("zero config must yield no anomalous langs, got %v", got.Anomalous)
+	}
+}
+
+// TestTouchedManifests pins the exported manifest catalog matcher shared
+// with importers (signatory's pr-scan): basename match against known
+// dependency manifests/lockfiles, order-preserving, subdir-aware.
+func TestTouchedManifests(t *testing.T) {
+	t.Parallel()
+	files := []codeshape.File{
+		{Path: "go.mod"},
+		{Path: "src/app.go"},
+		{Path: "frontend/package-lock.json"},
+		{Path: "crates/x/Cargo.toml"},
+		{Path: "README.md"},
+		{Path: "go.mod.bak"}, // not a manifest (basename differs)
+	}
+	got := codeshape.TouchedManifests(files)
+	want := []string{"go.mod", "frontend/package-lock.json", "crates/x/Cargo.toml"}
+	if !slices.Equal(got, want) {
+		t.Errorf("TouchedManifests = %v, want %v", got, want)
+	}
+}
+
 func TestCollect_AgentConfigPathsTouched(t *testing.T) {
 	t.Parallel()
 

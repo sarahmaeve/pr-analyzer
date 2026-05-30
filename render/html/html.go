@@ -31,6 +31,9 @@ var pageTemplate string
 //go:embed style.css
 var pageCSS string
 
+//go:embed loader.js
+var loaderJS string
+
 // page is the data the template iterates over. Renderer-only fields
 // (Count, GeneratedAtFormatted, CSS, Views) sit alongside the
 // embedded Envelope so the template can reach the source repo /
@@ -62,10 +65,86 @@ type analysisView struct {
 	AuthorClass            string // modifier class on the summary-row author link; empty for "no special highlight"
 }
 
-// Render returns a complete HTML document for the given envelope.
-// Pure function: no clock reads, no map iteration order surfaces,
-// no I/O. The same envelope produces byte-identical output across
-// calls.
+// Pill is a status chip an enricher places in a drill-down, rendered in
+// the report's pra-pill vocabulary. Tier selects the color treatment and
+// should be one of "danger", "warning", "success", or "info"; the loader
+// degrades any other value to "info" so an unknown tier never emits a
+// broken class.
+type Pill struct {
+	Text string `json:"text"`
+	Tier string `json:"tier"`
+}
+
+// Row is a labelled detail line in a drill-down — a dt/dd pair rendered
+// in the same pra-pr-signals grid the mechanistic signals use.
+type Row struct {
+	Term   string `json:"term"`
+	Detail string `json:"detail"`
+}
+
+// Section is one extra block an enricher adds to a PR's drill-down. It
+// renders below the mechanistic signals, inside a pra-pr-deep section,
+// reusing pra-pill / pra-pr-signals — the enricher supplies structured
+// data, never HTML, so the look matches the rest of the report
+// automatically (including any future restyle).
+type Section struct {
+	Title string `json:"title"`
+	Pills []Pill `json:"pills,omitempty"`
+	Rows  []Row  `json:"rows,omitempty"`
+}
+
+// Enrichment maps a PR number to the extra drill-down sections for that
+// PR. This is the signatory-agnostic seam: pr-analyzer's report knows how
+// to render the sections in its own style but nothing about what produced
+// them (a deep content scan, a burn ledger, ...). The enrichment is
+// delivered out-of-band — see SidecarJS — so index.html is byte-identical
+// whether or not anything was scanned, and the deep layer is purely
+// additive.
+type Enrichment map[int][]Section
+
+const (
+	// SidecarFilename is the file an enricher writes NEXT TO index.html.
+	// The report's in-page loader pulls it in via <script src> (which
+	// works from file://, unlike fetch), so opening index.html directly
+	// off disk populates the drill-downs. A missing sidecar is a no-op:
+	// the page renders exactly as pr-analyzer generated it.
+	SidecarFilename = "pr-scan.js"
+	// sidecarGlobal is the window property the sidecar assigns and the
+	// in-page loader reads. Private: the stable contract is the file name
+	// + SidecarJS, not the variable name.
+	sidecarGlobal = "__praEnrichment"
+)
+
+// SidecarJS serializes enrichment into the body of the sidecar file
+// (SidecarFilename): a single assignment of the enrichment JSON to the
+// loader's global. An enricher writes these bytes next to index.html;
+// pr-analyzer never rewrites index.html and the enricher never writes
+// HTML. Deterministic for identical input.
+func SidecarJS(e Enrichment) ([]byte, error) {
+	body, err := stdjson.MarshalIndent(e, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal enrichment: %w", err)
+	}
+	// Defense in depth: encoding/json already escapes '<' as <, so a
+	// hostile finding string cannot emit a literal "</" here, and the
+	// sidecar is delivered as an external <script src> where "</script>"
+	// has no termination semantics anyway. This substitution is therefore
+	// a belt-and-suspenders no-op (\/ decodes to /) that still holds if a
+	// future change ever inlines these bytes into a <script> block.
+	body = bytes.ReplaceAll(body, []byte("</"), []byte("<\\/"))
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "window.%s = ", sidecarGlobal)
+	buf.Write(body)
+	buf.WriteString(";\n")
+	return buf.Bytes(), nil
+}
+
+// Render returns a complete HTML document for the given envelope. Pure
+// function: no clock reads, no map iteration order surfaces, no I/O. The
+// same envelope produces byte-identical output across calls — and the
+// output does not depend on any enrichment: deep findings are layered in
+// at view time from the sidecar (SidecarFilename), never baked into the
+// page.
 func Render(env rjson.Envelope) (string, error) {
 	jsonBody, err := stdjson.MarshalIndent(env, "  ", "  ")
 	if err != nil {
@@ -129,7 +208,17 @@ func Render(env rjson.Envelope) (string, error) {
 	// doc-comment for the html/template-JS-context rationale.
 	buf.WriteString("  <script type=\"application/json\" id=\"pra-data\">\n")
 	buf.Write(jsonBody)
-	buf.WriteString("\n  </script>\n</body>\n</html>\n")
+	buf.WriteString("\n  </script>\n")
+	// Optional enrichment, loaded out-of-band so the page above is
+	// identical whether or not anything was scanned: the sidecar
+	// (SidecarFilename) is pulled in via <script src> — which works from
+	// file://, unlike fetch — and the loader folds any findings into the
+	// matching drill-downs. A missing sidecar leaves the page untouched.
+	fmt.Fprintf(&buf, "  <script src=%q></script>\n", SidecarFilename)
+	buf.WriteString("  <script>\n")
+	buf.WriteString(loaderJS)
+	buf.WriteString("  </script>\n")
+	buf.WriteString("</body>\n</html>\n")
 	return buf.String(), nil
 }
 

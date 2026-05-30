@@ -16,14 +16,23 @@ type PRRef struct {
 }
 
 type PR struct {
-	Ref          PRRef     `json:"ref"`
-	Title        string    `json:"title"`
-	Author       string    `json:"author"`
-	URL          string    `json:"url"`
-	State        string    `json:"state"`
-	Draft        bool      `json:"draft"`
-	BaseRef      string    `json:"base_ref"`
-	HeadRef      string    `json:"head_ref"`
+	Ref     PRRef  `json:"ref"`
+	Title   string `json:"title"`
+	Author  string `json:"author"`
+	URL     string `json:"url"`
+	State   string `json:"state"`
+	Draft   bool   `json:"draft"`
+	BaseRef string `json:"base_ref"`
+	HeadRef string `json:"head_ref"`
+	// BaseSHA / HeadSHA are the base/head commit SHAs as reported by the
+	// connector, carried verbatim and NOT validated as well-formed object
+	// names. Empty when the connector cannot supply them. They identify
+	// the commit the PR proposes (HeadSHA) for downstream deep analysis; a
+	// consumer that resolves HeadSHA to a git ref, path, or command
+	// argument must validate its shape first — it is connector-defined,
+	// opaque data, not a trusted SHA.
+	BaseSHA      string    `json:"base_sha"`
+	HeadSHA      string    `json:"head_sha"`
 	Additions    int       `json:"additions"`
 	Deletions    int       `json:"deletions"`
 	ChangedFiles int       `json:"changed_files"`
@@ -40,6 +49,11 @@ type PR struct {
 	// their platform exposes; the analyzer and renderer treat the
 	// value as opaque below the rendering layer.
 	AuthorAssociation string `json:"author_association"`
+	// AuthorType is the GitHub user object's type for the PR author:
+	// "User", "Bot", or "Organization". Connectors that can't supply it
+	// leave it empty. Lets consumers distinguish a human contributor
+	// from an App/bot identity (dependabot[bot] etc.).
+	AuthorType string `json:"author_type"`
 }
 
 type PRFile struct {

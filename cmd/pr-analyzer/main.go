@@ -20,8 +20,8 @@ import (
 	"github.com/alecthomas/kong"
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
+	"github.com/sarahmaeve/pr-analyzer/configfile"
 	"github.com/sarahmaeve/pr-analyzer/connectors/github"
-	"github.com/sarahmaeve/pr-analyzer/internal/configfile"
 	"github.com/sarahmaeve/pr-analyzer/internal/credentials"
 	"github.com/sarahmaeve/pr-analyzer/render/cli"
 	rhtml "github.com/sarahmaeve/pr-analyzer/render/html"

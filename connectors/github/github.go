@@ -75,10 +75,12 @@ type prPayload struct {
 
 type userPayload struct {
 	Login string `json:"login"`
+	Type  string `json:"type"`
 }
 
 type refPayload struct {
 	Ref string `json:"ref"`
+	SHA string `json:"sha"`
 }
 
 type labelPayload struct {
@@ -113,11 +115,14 @@ func (c *Client) fetchPRDetail(ctx context.Context, ref analyzer.PRRef) (analyze
 		Draft:             p.Draft,
 		BaseRef:           p.Base.Ref,
 		HeadRef:           p.Head.Ref,
+		BaseSHA:           p.Base.SHA,
+		HeadSHA:           p.Head.SHA,
 		Additions:         p.Additions,
 		Deletions:         p.Deletions,
 		ChangedFiles:      p.ChangedFiles,
 		Labels:            labels,
 		AuthorAssociation: p.AuthorAssociation,
+		AuthorType:        p.User.Type,
 		CreatedAt:         p.CreatedAt,
 		UpdatedAt:         p.UpdatedAt,
 	}, nil

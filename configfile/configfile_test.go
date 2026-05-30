@@ -9,7 +9,7 @@ import (
 
 	"github.com/sarahmaeve/pr-analyzer/analyzer"
 	"github.com/sarahmaeve/pr-analyzer/codeshape"
-	"github.com/sarahmaeve/pr-analyzer/internal/configfile"
+	"github.com/sarahmaeve/pr-analyzer/configfile"
 	"github.com/sarahmaeve/pr-analyzer/render"
 )
 

@@ -313,6 +313,57 @@ details[open] > summary .pra-pr-toggle::before { content: '[−]'; }
   word-break: break-word;
 }
 
+/* ===== Drill-down enrichment (caller-injected deep sections) =====
+ * Rendered below the mechanistic signals from structured data supplied
+ * by an enricher (e.g. signatory's pr-scan). Reuses pra-pill and
+ * pra-pr-signals; only the section frame is new. The dashed rule
+ * separates "what pr-analyzer measured" from "what a deeper pass found". */
+.pra-pr-deep {
+  margin-top: var(--pra-space-lg);
+  padding-top: var(--pra-space-md);
+  border-top: 1px dashed var(--pra-color-border);
+}
+.pra-pr-deep-title {
+  font-family: var(--pra-font-headline);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pra-color-secondary);
+  margin: 0 0 var(--pra-space-sm);
+}
+.pra-pr-deep-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pra-space-sm);
+  margin: 0 0 var(--pra-space-sm);
+}
+
+/* Scan flag — injected client-side by the loader onto the summary row of
+ * every PR the sidecar enriched, so the collapsed overview shows which PRs
+ * were pr-scanned and their headline verdict at a glance. The left-edge
+ * accent (color = verdict tier) makes scanned rows scannable in a long
+ * list; the badge carries the verdict text. Both appear only when a
+ * sidecar is present — no sidecar, no flag. */
+.pra-pr-scan-flag {
+  flex-shrink: 0;
+}
+.pra-pr-scanned {
+  border-left-width: 3px;
+}
+.pra-pr-scanned-danger {
+  border-left-color: var(--pra-color-error);
+}
+.pra-pr-scanned-warning {
+  border-left-color: var(--pra-color-warning);
+}
+.pra-pr-scanned-success {
+  border-left-color: var(--pra-color-success);
+}
+.pra-pr-scanned-info {
+  border-left-color: var(--pra-color-info);
+}
+
 /* ===== Status pills ===== */
 .pra-pill {
   display: inline-block;

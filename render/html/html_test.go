@@ -492,12 +492,23 @@ func TestRender_escapesScriptInjection(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 
-	// The literal "</script>" must not appear except as the legitimate
-	// closer of the pra-data block itself. We assert by counting: one
-	// </script> for the data block, and zero others.
-	count := strings.Count(out, "</script>")
-	if count != 1 {
-		t.Errorf("expected exactly one </script> in output (the data block closer), got %d", count)
+	// The page has three legitimate <script> elements (the pra-data
+	// block, the sidecar <script src>, and the inline loader). A
+	// user-controlled "</script>" leaking from the title would close one
+	// early, leaving more closers than openers — so balance is the real
+	// invariant, robust to adding/removing legitimate scripts. This
+	// exercises the title's path through html/template + the inline JSON
+	// block; the out-of-band enrichment path (SidecarJS, which carries a
+	// different set of untrusted strings) is covered adversarially by
+	// TestSidecarJS_neutralizesScriptBreakout.
+	if opens, closes := strings.Count(out, "<script"), strings.Count(out, "</script>"); opens != closes {
+		t.Errorf("unbalanced <script> tags (opens=%d, closes=%d) — a user-controlled </script> likely leaked", opens, closes)
+	}
+	// The literal injected closer must not survive verbatim (encoding/json
+	// renders the title's "<" as < in the data block, and
+	// html/template escapes it in the summary).
+	if strings.Contains(out, "</script><img") {
+		t.Error("user-controlled </script><img> leaked verbatim into the output")
 	}
 	// The injected <img> payload must not survive as a real element —
 	// the actual security property. After html/template's escape, "<img"
@@ -564,5 +575,140 @@ func TestRender_emptyAnalyses(t *testing.T) {
 	}
 	if !strings.Contains(out, "o/r") {
 		t.Error("empty-envelope render missing repo header")
+	}
+}
+
+// TestRender_includesSidecarLoader proves the page always carries the
+// out-of-band enrichment plumbing — the <script src> for the sidecar and
+// the inline loader — but bakes in NO deep sections itself: enrichment is
+// layered at view time from the sidecar, so index.html is identical
+// whether or not anything was scanned.
+func TestRender_includesSidecarLoader(t *testing.T) {
+	t.Parallel()
+
+	out, err := html.Render(fixtureEnvelope())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	wants := []string{
+		`<script src="pr-scan.js"></script>`, // optional sidecar, file://-safe
+		"window.__praEnrichment",             // loader reads this global
+		"pra-pr-deep",                        // loader builds sections with this class
+		"querySelectorAll",                   // loader walks the PR list
+		"pra-pr-scanned",                     // loader flags a scanned PR's summary row
+		"pra-pr-scan-flag",                   // verdict badge injected into that row
+	}
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Errorf("render missing sidecar-loader plumbing %q", w)
+		}
+	}
+	// No deep section is server-rendered — the markup only appears after
+	// the loader runs against a sidecar in the browser.
+	if strings.Contains(out, `class="pra-pr-deep"`) {
+		t.Error("Render must not bake deep sections into the page (they are injected client-side)")
+	}
+}
+
+// TestSidecarJS_roundTrips proves SidecarJS emits a single assignment of
+// the enrichment JSON to the loader's global, and that the JSON payload
+// round-trips back to the same Enrichment.
+func TestSidecarJS_roundTrips(t *testing.T) {
+	t.Parallel()
+
+	in := html.Enrichment{
+		3429: []html.Section{{
+			Title: "pr-scan deep findings",
+			Pills: []html.Pill{{Text: "BLOCK", Tier: "danger"}},
+			Rows:  []html.Row{{Term: "Exfil host", Detail: "webhook.site (init.go:5)"}},
+		}},
+	}
+	js, err := html.SidecarJS(in)
+	if err != nil {
+		t.Fatalf("SidecarJS: %v", err)
+	}
+	body := string(js)
+	const prefix = "window.__praEnrichment = "
+	if !strings.HasPrefix(body, prefix) {
+		t.Fatalf("sidecar must assign the loader global; got:\n%s", body)
+	}
+	if html.SidecarFilename != "pr-scan.js" {
+		t.Errorf("SidecarFilename = %q, want pr-scan.js (the name the page's <script src> expects)", html.SidecarFilename)
+	}
+	payload := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(body, prefix)), ";")
+	var got html.Enrichment
+	if err := stdjson.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatalf("sidecar JSON does not round-trip: %v\npayload:\n%s", err, payload)
+	}
+	if len(got[3429]) != 1 || got[3429][0].Pills[0].Text != "BLOCK" {
+		t.Errorf("round-tripped enrichment lost data: %+v", got)
+	}
+}
+
+// TestSidecarJS_neutralizesScriptBreakout feeds hostile, attacker-
+// influenceable finding strings through SidecarJS and pins the real
+// guarantee: encoding/json escapes every '<' as <, so no "</script>"
+// (or any raw '<') can survive into the sidecar bytes to break out of a
+// <script> context — while the data still round-trips intact. This is the
+// adversarial counterpart to TestSidecarJS_roundTrips, which covers only
+// benign input.
+func TestSidecarJS_neutralizesScriptBreakout(t *testing.T) {
+	t.Parallel()
+
+	hostile := html.Enrichment{
+		7: []html.Section{{
+			Title: `x </script><svg onload=alert(1)>`,
+			Pills: []html.Pill{{Text: "</SCRIPT\n>", Tier: "danger"}},
+			Rows:  []html.Row{{Term: "t", Detail: `]]><!--</script>`}},
+		}},
+	}
+	js, err := html.SidecarJS(hostile)
+	if err != nil {
+		t.Fatalf("SidecarJS: %v", err)
+	}
+	body := string(js)
+
+	if strings.Contains(body, "<") {
+		t.Errorf("a raw '<' survived into the sidecar bytes — script-breakout risk:\n%s", body)
+	}
+	if strings.Contains(strings.ToLower(body), "</script") {
+		t.Errorf("'</script' present in sidecar bytes:\n%s", body)
+	}
+
+	// Escaping must not corrupt the data: it still round-trips verbatim.
+	const prefix = "window.__praEnrichment = "
+	payload := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(body, prefix)), ";")
+	var got html.Enrichment
+	if err := stdjson.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatalf("hostile enrichment does not round-trip: %v\npayload:\n%s", err, payload)
+	}
+	if got[7][0].Pills[0].Text != "</SCRIPT\n>" || got[7][0].Rows[0].Detail != `]]><!--</script>` {
+		t.Errorf("round-trip altered hostile data: %+v", got[7][0])
+	}
+}
+
+// TestSidecarJS_deterministic pins the "Deterministic for identical
+// input" contract across a multi-key Enrichment. Go randomizes map
+// iteration order, so without stable key handling two marshals could
+// differ; encoding/json sorts the keys, so the bytes are byte-identical
+// across calls — enrichers may diff sidecars across runs.
+func TestSidecarJS_deterministic(t *testing.T) {
+	t.Parallel()
+
+	e := html.Enrichment{
+		100: []html.Section{{Title: "a"}},
+		2:   []html.Section{{Title: "b"}},
+		42:  []html.Section{{Title: "c"}},
+	}
+	first, err := html.SidecarJS(e)
+	if err != nil {
+		t.Fatalf("SidecarJS (first): %v", err)
+	}
+	second, err := html.SidecarJS(e)
+	if err != nil {
+		t.Fatalf("SidecarJS (second): %v", err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("SidecarJS not deterministic across calls:\n%s\n---\n%s", first, second)
 	}
 }

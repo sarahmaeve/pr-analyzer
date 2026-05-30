@@ -71,17 +71,17 @@ func Collect(in Input) Signals {
 		Total:     in.Additions + in.Deletions,
 	}
 	exceeds, threshold := deriveMaxLOC(loc.Total, in.Config.MaxLOC)
-	languages := detectLanguages(in.Files)
+	languages := DetectLanguages(in.Files)
 	return Signals{
 		LOC:                     loc,
 		TestsTouched:            anyTestFile(in.Files),
-		ManifestsTouched:        touchedManifests(in.Files),
+		ManifestsTouched:        TouchedManifests(in.Files),
 		Languages:               languages,
 		RiskyPathsTouched:       touchedRiskyPaths(in.Files, in.Config.RiskyPaths),
 		AgentConfigPathsTouched: touchedAgentConfig(in.Files),
 		ExceedsMaxLOC:           exceeds,
 		MaxLOCThreshold:         threshold,
-		LanguagesByPosture:      bucketLanguages(languages, in.Config.Languages),
+		LanguagesByPosture:      BucketLanguages(languages, in.Config.Languages),
 	}
 }
 
@@ -122,11 +122,15 @@ func isProgrammingLanguage(name string) bool {
 	return ok
 }
 
-// bucketLanguages partitions the detected languages by the project's
-// posture. Zero-value LanguageConfig (no preferred or allowed lists)
-// returns a zero-value LanguagesByPosture: the project has expressed no
-// opinion and the renderer should not emit posture bullets.
-func bucketLanguages(detected []string, cfg LanguageConfig) LanguagesByPosture {
+// BucketLanguages partitions detected languages by the project's posture:
+// Preferred / Allowed / Anomalous, where Anomalous is a programming
+// language (per isProgrammingLanguage — markup like Markdown/YAML/JSON is
+// excluded) present in neither list. A zero-value LanguageConfig (no
+// preferred and no allowed) returns a zero-value LanguagesByPosture: the
+// project has expressed no opinion. Exported so other tools consuming a
+// shared pr-analyzer.yaml (e.g. signatory's pr-scan) apply the same
+// acceptable/not-acceptable weighting without reimplementing it.
+func BucketLanguages(detected []string, cfg LanguageConfig) LanguagesByPosture {
 	if len(cfg.Preferred) == 0 && len(cfg.Allowed) == 0 {
 		return LanguagesByPosture{}
 	}
@@ -156,9 +160,30 @@ func stringSet(s []string) map[string]struct{} {
 	return m
 }
 
+// MatchesRiskyPath reports whether a single repo-relative path is covered
+// by one of the configured risky-path prefixes. Match semantics: a
+// pattern P matches a path F iff P == F or P + "/" is a prefix of F (no
+// wildcards). Matching is byte-exact and case-sensitive and applies no
+// path normalization, so external callers must pass cleaned, slash-
+// separated repo-relative paths — the form pr-analyzer's own connectors
+// already emit. Exported so other tools consuming a shared
+// pr-analyzer.yaml (e.g. signatory's pr-scan) apply the same org policy
+// to a changelist without reimplementing — and possibly diverging from —
+// the rule.
+func MatchesRiskyPath(filePath string, patterns []string) bool {
+	for _, p := range patterns {
+		if p == "" {
+			continue
+		}
+		if filePath == p || strings.HasPrefix(filePath, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // touchedRiskyPaths returns the PR file paths that match one of the
-// configured prefixes. Match semantics: a pattern P matches a file path
-// F iff P == F or P + "/" is a prefix of F. A file matching multiple
+// configured prefixes (see MatchesRiskyPath). A file matching multiple
 // patterns is reported once. Output preserves file-list order.
 func touchedRiskyPaths(files []File, patterns []string) []string {
 	if len(patterns) == 0 {
@@ -166,11 +191,8 @@ func touchedRiskyPaths(files []File, patterns []string) []string {
 	}
 	var out []string
 	for _, f := range files {
-		for _, p := range patterns {
-			if f.Path == p || strings.HasPrefix(f.Path, p+"/") {
-				out = append(out, f.Path)
-				break
-			}
+		if MatchesRiskyPath(f.Path, patterns) {
+			out = append(out, f.Path)
 		}
 	}
 	return out
@@ -263,7 +285,12 @@ var manifestBasenames = map[string]struct{}{
 	"Gemfile.lock":      {},
 }
 
-func touchedManifests(files []File) []string {
+// TouchedManifests returns the PR file paths whose basename is a known
+// dependency manifest or lockfile (go.mod, package.json, Cargo.toml/lock,
+// requirements.txt, Gemfile/lock, …). Output preserves file-list order.
+// Exported so other tools (signatory's pr-scan) flag dependency-manifest
+// changes from the same catalog rather than a divergent one.
+func TouchedManifests(files []File) []string {
 	var out []string
 	for _, f := range files {
 		if _, ok := manifestBasenames[path.Base(f.Path)]; ok {
@@ -314,7 +341,12 @@ var languageByBasename = map[string]string{
 	"Makefile":   "Makefile",
 }
 
-func detectLanguages(files []File) []string {
+// DetectLanguages returns the sorted, unique set of languages present in
+// files, classified by basename then extension. Path-only (no content),
+// so a caller with just a changelist can use it. Exported alongside
+// BucketLanguages so importers detect languages by pr-analyzer's mapping
+// rather than a divergent one.
+func DetectLanguages(files []File) []string {
 	seen := make(map[string]struct{})
 	for _, f := range files {
 		base := path.Base(f.Path)
